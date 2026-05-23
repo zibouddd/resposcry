@@ -1,0 +1,15 @@
+[package]
+name = "reposcry-context"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reposcry-graph = { path = "../reposcry-graph" }
+reposcry-indexer = { path = "../reposcry-indexer" }
+reposcry-cache = { path = "../reposcry-cache" }
+reposcry-git = { path = "../reposcry-git" }
+reposcry-rules = { path = "../reposcry-rules" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"

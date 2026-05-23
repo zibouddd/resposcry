@@ -1,0 +1,20 @@
+target/
+.code-review-graph/crg.db
+.code-review-graph/*.db
+.code-review-graph/*.sqlite
+.code-review-graph/AI_CONTEXT.md
+.code-review-graph/PR_REVIEW.md
+*.db
+*.sqlite
+*.sqlite3
+.DS_Store
+
+# CRG:gitignore:BEGIN
+# CRG local cache and generated reports
+.code-review-graph/crg.db
+.code-review-graph/*.db
+.code-review-graph/*.sqlite
+.code-review-graph/AI_CONTEXT.md
+.code-review-graph/PR_REVIEW.md
+.code-review-graph/*.log
+# CRG:gitignore:END

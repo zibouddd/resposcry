@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/reposcry-cli",
+    "crates/reposcry-indexer",
+    "crates/reposcry-graph",
+    "crates/reposcry-cache",
+    "crates/reposcry-git",
+    "crates/reposcry-context",
+    "crates/reposcry-rules",
+    "crates/reposcry-report",
+]

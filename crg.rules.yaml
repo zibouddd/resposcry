@@ -1,0 +1,26 @@
+rules:
+  - name: no-ui-to-db
+    description: UI must not import database code directly.
+    from: "src/components/**"
+    to: "src/server/db/**"
+    severity: Error
+
+  - name: no-api-to-ui
+    description: API routes must not import UI components.
+    from: "src/app/api/**"
+    to: "src/components/**"
+    severity: Error
+
+  - name: no-large-files
+    description: Files should stay below 800 estimated lines.
+    max_lines: 800
+    severity: Warning
+
+  - name: no-cycles
+    description: No dependency cycles allowed.
+    severity: Error
+
+  - name: no-build-artifacts
+    description: Build artifacts should not be indexed or committed.
+    path: "target/**"
+    severity: Error
