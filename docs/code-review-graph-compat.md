@@ -18,6 +18,7 @@ reposcry query_graph "tests_for crates/reposcry-cache/src/db.rs"
 reposcry semantic_search_nodes "cache db" --kind function --limit 20
 reposcry semantic_search_nodes "cache db" --limit 20 --semantic
 reposcry get_architecture_overview --format markdown
+reposcry query_graph "callers_of rebuild_graph" --no-runtime-calls
 reposcry refactor_tool dead-code
 reposcry refactor_tool rename CacheDb RepoCacheDb
 reposcry refactor_tool split-file crates/reposcry-cli/src/main.rs
@@ -40,4 +41,4 @@ reposcry refactor-tool dead-code
 
 The compatibility layer reuses RepoScry's existing local SQLite cache at `.reposcry/reposcry.db`.
 
-Current output is based on indexed files, symbols, imports, and resolved import edges. Precise function-level call-flow output requires future call-edge indexing.
+Current output is based on indexed files, symbols, imports, persisted call sites, persisted symbol-level call edges, and resolved import edges. Runtime call inference remains available as a fallback when persisted call edges are missing.

@@ -20,3 +20,5 @@ jobs:
         run: cargo run -p reposcry-cli --bin reposcry -- index
       - name: Validate
         run: cargo run -p reposcry-cli --bin reposcry -- validate main
+      - name: README smoke
+        run: bash scripts/smoke-readme.sh

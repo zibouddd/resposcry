@@ -40,6 +40,25 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/reposcry dist/reposcry
           tar -czf reposcry-${{ matrix.target }}.tar.gz -C dist reposcry
+      - name: Verify packaged binary (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          rm -rf verify-dist
+          mkdir -p verify-dist
+          tar -xzf reposcry-${{ matrix.target }}.tar.gz -C verify-dist
+          ./verify-dist/reposcry --version
+      - name: Verify install.sh contract (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          sha256sum reposcry-${{ matrix.target }}.tar.gz > reposcry-${{ matrix.target }}.tar.gz.sha256
+          export REPOSCRY_RELEASE_BASE_URL="file://$PWD"
+          export REPOSCRY_INSTALL_DIR="$PWD/install-check"
+          export REPOSCRY_OS="$(uname -s)"
+          export REPOSCRY_ARCH="$(uname -m)"
+          ./install.sh
+          "$PWD/install-check/reposcry" --version
       - name: Package release (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -47,12 +66,37 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/${{ matrix.target }}/release/reposcry.exe dist/reposcry.exe
           Compress-Archive -Path dist/reposcry.exe -DestinationPath reposcry-${{ matrix.target }}.zip
-      - name: Generate checksums
+      - name: Verify packaged binary (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force verify-dist -ErrorAction SilentlyContinue
+          Expand-Archive -Path reposcry-${{ matrix.target }}.zip -DestinationPath verify-dist
+          .\verify-dist\reposcry.exe --version
+      - name: Generate checksums (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $asset = "reposcry-${{ matrix.target }}.zip"
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          Set-Content -NoNewline -Path "$asset.sha256" -Value "$hash  $asset"
+      - name: Verify install.ps1 contract (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $releaseDir = (Get-Location).Path
+          $installDir = Join-Path $releaseDir "install-check"
+          Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+          $env:REPOSCRY_RELEASE_BASE_URL = "file:///$($releaseDir -replace '\\','/')"
+          $env:REPOSCRY_INSTALL_DIR = $installDir
+          $env:REPOSCRY_ARCH = $env:PROCESSOR_ARCHITECTURE
+          .\install.ps1
+          & (Join-Path $installDir 'reposcry.exe') --version
+      - name: Generate checksums (unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          if ls reposcry-${{ matrix.target }}.* 1> /dev/null 2>&1; then
-            sha256sum reposcry-${{ matrix.target }}.* > reposcry-${{ matrix.target }}.sha256
-          fi
+          sha256sum reposcry-${{ matrix.target }}.tar.gz > reposcry-${{ matrix.target }}.tar.gz.sha256
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

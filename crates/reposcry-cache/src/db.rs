@@ -497,6 +497,28 @@ impl CacheDb {
         Ok(())
     }
 
+    pub fn has_search_vector(&self, node_id: i64, backend: &str) -> Result<bool> {
+        let mut stmt = self.conn.prepare(
+            "SELECT 1 FROM search_vectors WHERE node_id = ?1 AND backend = ?2 LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![node_id, backend], |row| row.get::<_, i64>(0))?;
+        match rows.next() {
+            Some(Ok(_)) => Ok(true),
+            Some(Err(error)) => Err(error.into()),
+            None => Ok(false),
+        }
+    }
+
+    pub fn prune_search_vectors_to_index(&self, backend: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM search_vectors \
+             WHERE backend = ?1 \
+             AND node_id NOT IN (SELECT CAST(node_id AS INTEGER) FROM search_index)",
+            params![backend],
+        )?;
+        Ok(())
+    }
+
     pub fn insert_edge(
         &self,
         source_file_id: i64,

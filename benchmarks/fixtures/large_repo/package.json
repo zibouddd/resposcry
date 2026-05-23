@@ -1,0 +1,8 @@
+{
+  "name": "large-repo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

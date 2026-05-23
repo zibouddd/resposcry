@@ -10,7 +10,7 @@ RepoScry is a local code review graph engine for repository indexing, impact ana
 
 - Canonical CLI: `reposcry`
 
-`reposcry` is the primary user-facing command for indexing, graph analysis, CRG-compatible queries, and MCP serving. Compatibility binaries may still exist for migration, but the documented interface is `reposcry`.
+`reposcry` is the user-facing command for indexing, graph analysis, CRG-compatible queries, and MCP serving.
 
 ## Install
 
@@ -24,6 +24,27 @@ From release artifact:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zibouddd/resposcry/main/install.sh | bash
+```
+
+The installer downloads the release archive and verifies its SHA-256 checksum before installing `reposcry`.
+
+On Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/zibouddd/resposcry/main/install.ps1 | iex
+```
+
+Pin a specific tagged release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zibouddd/resposcry/main/install.sh | REPOSCRY_VERSION=v0.1.0 bash
+```
+
+Pin a specific tagged release on Windows:
+
+```powershell
+$env:REPOSCRY_VERSION='v0.1.0'
+irm https://raw.githubusercontent.com/zibouddd/resposcry/main/install.ps1 | iex
 ```
 
 Update an existing source install:
@@ -40,7 +61,14 @@ Initialize and index the current repository:
 reposcry init
 reposcry index
 reposcry warm-calls
+reposcry refresh-search --semantic-backend local-hash-v1
 reposcry stats
+```
+
+Skip semantic vector refresh when you only want a fast lexical/code graph refresh:
+
+```bash
+reposcry index --no-semantic
 ```
 
 Build a focused context pack for an editing task:
@@ -71,10 +99,23 @@ Use the full-index command when you want one command for an install-time index p
 reposcry --repo . index-full
 ```
 
+Choose a semantic backend explicitly or force a full vector rebuild:
+
+```bash
+reposcry refresh-search --semantic-backend fastembed
+reposcry refresh-search --semantic-backend candle --reembed-all
+```
+
 If you already indexed files and only want to rebuild persisted call edges:
 
 ```bash
 reposcry --repo . warm-calls
+```
+
+If you only want to rebuild search documents and vectors from the cached graph:
+
+```bash
+reposcry --repo . refresh-search --semantic-backend local-hash-v1
 ```
 
 ## CRG-compatible commands
@@ -144,6 +185,9 @@ Additional configured backends:
 - `fastembed`
 - `candle`
 
+Index-time vector refresh now reuses cached vectors for unchanged node ids on a per-backend basis. Use `--reembed-all` when you want to discard and rebuild vectors for the selected backend, or `--no-semantic` to rebuild only lexical search documents.
+Use `reposcry refresh-search` when you want to rebuild search documents and vectors from the cached graph without rescanning the repository.
+
 `fastembed` now defaults its writable cache under `.reposcry/hf-home` when `HF_HOME` is not set. You can override that location with `REPOSCRY_FASTEMBED_CACHE_DIR`.
 `candle` uses the same writable Hugging Face cache root and supports:
 - `REPOSCRY_CANDLE_MODEL=qwen3` with default repo `Qwen/Qwen3-Embedding-0.6B`
@@ -186,7 +230,27 @@ or on Windows:
 ./scripts/bench.ps1
 ```
 
+Run the full local fixture sweep with:
+
+```powershell
+./scripts/bench-all-fixtures.ps1
+```
+
 Published benchmark notes live in [BENCHMARKS.md](BENCHMARKS.md).
+
+## Release smoke
+
+Run the local release/install smoke path with:
+
+```powershell
+./scripts/smoke-release.ps1
+```
+
+or on Unix-like systems:
+
+```bash
+./scripts/smoke-release.sh
+```
 
 ## Documentation
 
@@ -200,4 +264,4 @@ Published benchmark notes live in [BENCHMARKS.md](BENCHMARKS.md).
 - Dynamic imports, reflection, and framework runtime behavior are under-approximated.
 - Call resolution still uses heuristics when multiple symbol matches are plausible.
 - Diff-based commands such as `detect_changes main HEAD` inspect git refs, not unstaged working tree edits.
-- Some older examples and wrappers may still mention compatibility binaries; prefer `reposcry`.
+- Release-install verification currently covers checksum validation and local packaging logic; end-to-end GitHub release publication still requires exercising the workflow on GitHub.

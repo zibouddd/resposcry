@@ -1,0 +1,35 @@
+﻿{
+    "captured_at":  "2026-05-23T16:04:58.5411947Z",
+    "machine":  {
+                    "os":  "Microsoft Windows [version 10.0.26200.8457]",
+                    "cpu":  "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+                    "memory_gb":  "unknown"
+                },
+    "repo":  {
+                 "path":  "F:\\CODING\\2-PROJETS-EN-COURS\\CodeReviewGraphX\\benchmarks\\fixtures\\small_rust_repo",
+                 "fixture":  "small_rust_repo",
+                 "size":  "small",
+                 "notes":  "Compact Rust repository with a small rebuild_graph pipeline and tests.",
+                 "fixture_manifest":  "benchmarks/fixtures.json"
+             },
+    "metrics":  {
+                    "cold_index_ms":  1958,
+                    "warm_index_ms":  1620,
+                    "semantic_index_reuse_ms":  1684,
+                    "semantic_index_reembed_ms":  539,
+                    "call_warmup_ms":  105,
+                    "architecture_overview_ms":  65,
+                    "detect_changes_ms":  163,
+                    "affected_flows_ms":  166,
+                    "query_graph_callers_ms":  65,
+                    "semantic_search_ms":  71,
+                    "db_size_bytes":  90112,
+                    "files_indexed":  6,
+                    "symbols_indexed":  9,
+                    "imports_indexed":  2,
+                    "persisted_call_sites":  15,
+                    "persisted_symbol_call_edges":  6,
+                    "persisted_file_call_edges":  5,
+                    "total_edges":  6
+                }
+}

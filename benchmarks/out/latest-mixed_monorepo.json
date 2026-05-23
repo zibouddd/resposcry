@@ -1,0 +1,35 @@
+﻿{
+    "captured_at":  "2026-05-23T16:05:03.5922323Z",
+    "machine":  {
+                    "os":  "Microsoft Windows [version 10.0.26200.8457]",
+                    "cpu":  "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+                    "memory_gb":  "unknown"
+                },
+    "repo":  {
+                 "path":  "F:\\CODING\\2-PROJETS-EN-COURS\\CodeReviewGraphX\\benchmarks\\fixtures\\mixed_monorepo",
+                 "fixture":  "mixed_monorepo",
+                 "size":  "mixed",
+                 "notes":  "Multi-package repository with Rust and TypeScript components to track cross-language behavior.",
+                 "fixture_manifest":  "benchmarks/fixtures.json"
+             },
+    "metrics":  {
+                    "cold_index_ms":  190,
+                    "warm_index_ms":  237,
+                    "semantic_index_reuse_ms":  177,
+                    "semantic_index_reembed_ms":  173,
+                    "call_warmup_ms":  81,
+                    "architecture_overview_ms":  65,
+                    "detect_changes_ms":  158,
+                    "affected_flows_ms":  152,
+                    "query_graph_callers_ms":  63,
+                    "semantic_search_ms":  70,
+                    "db_size_bytes":  98304,
+                    "files_indexed":  10,
+                    "symbols_indexed":  6,
+                    "imports_indexed":  2,
+                    "persisted_call_sites":  12,
+                    "persisted_symbol_call_edges":  3,
+                    "persisted_file_call_edges":  2,
+                    "total_edges":  4
+                }
+}

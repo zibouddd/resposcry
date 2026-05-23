@@ -1,4 +1,7 @@
 target/
+.reposcry/
+benchmarks/fixtures/**/.reposcry/
+benchmarks/fixtures/**/.git/
 .code-review-graph/reposcry.db
 .code-review-graph/*.db
 .code-review-graph/*.sqlite
@@ -11,6 +14,9 @@ target/
 
 # CRG:gitignore:BEGIN
 # CRG local cache and generated reports
+.reposcry/
+benchmarks/fixtures/**/.reposcry/
+benchmarks/fixtures/**/.git/
 .code-review-graph/reposcry.db
 .code-review-graph/*.db
 .code-review-graph/*.sqlite

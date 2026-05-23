@@ -1,0 +1,36 @@
+﻿{
+    "captured_at":  "2026-05-23T15:06:15.6455751Z",
+    "machine":  {
+                    "os":  "Microsoft Windows [version 10.0.26200.8457]",
+                    "cpu":  "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+                    "memory_gb":  "unknown"
+                },
+    "repo":  {
+                 "path":  "F:\\CODING\\2-PROJETS-EN-COURS\\CodeReviewGraphX",
+                 "fixture":  "current_repo",
+                 "fixture_manifest":  "benchmarks/fixtures.json"
+             },
+    "metrics":  {
+                    "cold_index_ms":  5552,
+                    "warm_index_ms":  6376,
+                    "semantic_index_reuse_ms":  5032,
+                    "semantic_index_reembed_ms":  6966,
+                    "call_warmup_ms":  3792,
+                    "architecture_overview_ms":  120,
+                    "detect_changes_ms":  186,
+                    "affected_flows_ms":  177,
+                    "query_graph_callers_ms":  80,
+                    "semantic_search_ms":  285,
+                    "db_size_bytes":  3305472,
+                    "files_indexed":  49,
+                    "symbols_indexed":  439,
+                    "imports_indexed":  132,
+                    "persisted_call_sites":  3879,
+                    "persisted_symbol_call_edges":  712,
+                    "persisted_file_call_edges":  31,
+                    "total_edges":  60,
+                    "semantic_index_backend":  "fastembed",
+                    "semantic_index_backend_reuse_ms":  28390,
+                    "semantic_index_backend_reembed_ms":  16361
+                }
+}

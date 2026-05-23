@@ -12,7 +12,7 @@ use fastembed::{
 use serde::Serialize;
 
 #[allow(dead_code)]
-#[path = "bin/reposcry-crg.rs"]
+#[path = "crg_cli.rs"]
 mod crg_cli;
 mod installer;
 
@@ -20,7 +20,7 @@ use installer::{install_platform, InstallOptions, InstallPlatform};
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
-use reposcry_cache::db::{CacheDb, CachedCallSite, CachedSymbolEdge};
+use reposcry_cache::db::{CacheDb, CachedCallSite, CachedFile, CachedImport, CachedSymbolEdge};
 use reposcry_context::{ContextBuilder, ContextConfig, OutputFormat};
 use reposcry_git::GitIntegration;
 use reposcry_graph::edge::EdgeKind;
@@ -97,6 +97,15 @@ enum Commands {
         /// Preset to use (nextjs, rust, tauri, monorepo, python)
         #[arg(long)]
         preset: Option<String>,
+        /// Skip semantic vector refresh and rebuild only lexical search documents
+        #[arg(long, default_value_t = false)]
+        no_semantic: bool,
+        /// Override the semantic backend used for index-time vector refresh
+        #[arg(long)]
+        semantic_backend: Option<String>,
+        /// Force a full vector rebuild for the selected backend instead of reusing cached vectors
+        #[arg(long, default_value_t = false)]
+        reembed_all: bool,
     },
     /// Show repository statistics
     Stats,
@@ -161,10 +170,32 @@ enum Commands {
     IndexFull {
         #[arg(long)]
         preset: Option<String>,
+        /// Skip semantic vector refresh and rebuild only lexical search documents
+        #[arg(long, default_value_t = false)]
+        no_semantic: bool,
+        /// Override the semantic backend used for index-time vector refresh
+        #[arg(long)]
+        semantic_backend: Option<String>,
+        /// Force a full vector rebuild for the selected backend instead of reusing cached vectors
+        #[arg(long, default_value_t = false)]
+        reembed_all: bool,
     },
     /// Rebuild persisted call edges from indexed call sites
     #[command(name = "warm-calls", visible_alias = "warm_calls")]
     WarmCalls,
+    /// Rebuild lexical search docs and optional semantic vectors from the cached graph
+    #[command(name = "refresh-search", visible_alias = "refresh_search")]
+    RefreshSearch {
+        /// Skip semantic vector refresh and rebuild only lexical search documents
+        #[arg(long, default_value_t = false)]
+        no_semantic: bool,
+        /// Override the semantic backend used for vector refresh
+        #[arg(long)]
+        semantic_backend: Option<String>,
+        /// Force a full vector rebuild for the selected backend instead of reusing cached vectors
+        #[arg(long, default_value_t = false)]
+        reembed_all: bool,
+    },
     /// Reviewing code changes - gives risk-scored analysis.
     #[command(name = "detect_changes", visible_alias = "detect-changes")]
     DetectChanges {
@@ -335,9 +366,22 @@ fn main() -> anyhow::Result<()> {
             InstallPlatform::Hooks,
             action,
         ),
-        Commands::Index { preset } => {
-            cmd_index(&repo_root, &reposcry_dir, &db_path, preset.as_deref())
-        }
+        Commands::Index {
+            preset,
+            no_semantic,
+            semantic_backend,
+            reembed_all,
+        } => cmd_index(
+            &repo_root,
+            &reposcry_dir,
+            &db_path,
+            preset.as_deref(),
+            &SearchIndexOptions {
+                semantic_backend,
+                no_semantic,
+                reembed_all,
+            },
+        ),
         Commands::Stats => cmd_stats(&db_path),
         Commands::Files { language } => cmd_files(&repo_root, &db_path, language),
         Commands::Symbols { file } => cmd_symbols(&db_path, &file),
@@ -366,10 +410,36 @@ fn main() -> anyhow::Result<()> {
         Commands::Rules { action } => cmd_rules(&repo_root, &db_path, action),
         Commands::Validate { base, head } => cmd_validate(&repo_root, &db_path, &base, &head),
         Commands::Explain { file } => cmd_explain(&repo_root, &db_path, &file),
-        Commands::IndexFull { preset } => {
-            cmd_index_full(&repo_root, &reposcry_dir, &db_path, preset.as_deref())
-        }
+        Commands::IndexFull {
+            preset,
+            no_semantic,
+            semantic_backend,
+            reembed_all,
+        } => cmd_index_full(
+            &repo_root,
+            &reposcry_dir,
+            &db_path,
+            preset.as_deref(),
+            &SearchIndexOptions {
+                semantic_backend,
+                no_semantic,
+                reembed_all,
+            },
+        ),
         Commands::WarmCalls => cmd_warm_calls(&repo_root, &db_path),
+        Commands::RefreshSearch {
+            no_semantic,
+            semantic_backend,
+            reembed_all,
+        } => cmd_refresh_search(
+            &repo_root,
+            &db_path,
+            &SearchIndexOptions {
+                semantic_backend,
+                no_semantic,
+                reembed_all,
+            },
+        ),
         Commands::DetectChanges { base, head, format } => crg_cli::run_command(
             &repo_root,
             &db_path,
@@ -502,6 +572,12 @@ struct WarmCallsOutput {
     persisted_file_call_edges: usize,
 }
 
+struct SearchIndexOptions {
+    semantic_backend: Option<String>,
+    no_semantic: bool,
+    reembed_all: bool,
+}
+
 fn ensure_reposcry_dir(reposcry_dir: &Path) -> anyhow::Result<()> {
     if !reposcry_dir.exists() {
         std::fs::create_dir_all(reposcry_dir)?;
@@ -615,6 +691,7 @@ fn cmd_index(
     reposcry_dir: &Path,
     db_path: &Path,
     preset_name: Option<&str>,
+    search_index_options: &SearchIndexOptions,
 ) -> anyhow::Result<()> {
     info!("Indexing repository: {}", repo_root.display());
     ensure_reposcry_dir(reposcry_dir)?;
@@ -705,7 +782,7 @@ fn cmd_index(
     }
     rebuild_persisted_import_edges(&db)?;
     rebuild_persisted_call_edges(&db)?;
-    rebuild_search_index(&db, repo_root)?;
+    rebuild_search_index(&db, repo_root, search_index_options)?;
     let preset_name = preset_name.unwrap_or("none");
     db.set_config("last_indexed_at", &chrono::Utc::now().to_rfc3339())?;
     db.set_config("preset", preset_name)?;
@@ -728,8 +805,15 @@ fn cmd_index_full(
     reposcry_dir: &Path,
     db_path: &Path,
     preset_name: Option<&str>,
+    search_index_options: &SearchIndexOptions,
 ) -> anyhow::Result<()> {
-    cmd_index(repo_root, reposcry_dir, db_path, preset_name)?;
+    cmd_index(
+        repo_root,
+        reposcry_dir,
+        db_path,
+        preset_name,
+        search_index_options,
+    )?;
     let db = CacheDb::open(db_path)?;
     let output = FullIndexOutput {
         tool: "reposcry".to_string(),
@@ -770,11 +854,36 @@ fn cmd_warm_calls(repo_root: &Path, db_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
+fn cmd_refresh_search(
+    repo_root: &Path,
+    db_path: &Path,
+    options: &SearchIndexOptions,
+) -> anyhow::Result<()> {
+    let db = CacheDb::open(db_path)?;
+    rebuild_search_index(&db, repo_root, options)?;
+    Ok(())
+}
+
+fn rebuild_search_index(
+    db: &CacheDb,
+    repo_root: &Path,
+    options: &SearchIndexOptions,
+) -> anyhow::Result<()> {
     let files = db.get_all_files()?;
     db.clear_search_index()?;
-    let semantic_backend = configured_semantic_backend(db)?;
-    db.clear_search_vectors(None)?;
+    if options.no_semantic {
+        db.clear_search_vectors(None)?;
+    }
+    let semantic_backend = (!options.no_semantic)
+        .then(|| configured_semantic_backend(db, options.semantic_backend.as_deref()))
+        .transpose()?;
+    if let Some(semantic_backend) = semantic_backend.as_ref() {
+        if options.reembed_all {
+            db.clear_search_vectors(Some(semantic_backend.name()))?;
+        }
+    }
+    let mut inserted_vectors = 0usize;
+    let mut reused_vectors = 0usize;
     for file in &files {
         let imports = db.get_imports_by_file(file.id)?;
         let imports_text = imports
@@ -797,15 +906,24 @@ fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
             &imports_text,
             &source,
         )?;
-        db.insert_search_vector(
-            1_000_000_000_i64 + file.id,
-            &file.path,
-            "file",
-            &file.path,
-            None,
-            semantic_backend.name(),
-            &semantic_backend.embed_text(&format!("{} {} {}", file.path, imports_text, source))?,
-        )?;
+        if let Some(semantic_backend) = semantic_backend.as_ref() {
+            let node_id = 1_000_000_000_i64 + file.id;
+            if options.reembed_all || !db.has_search_vector(node_id, semantic_backend.name())? {
+                db.insert_search_vector(
+                    node_id,
+                    &file.path,
+                    "file",
+                    &file.path,
+                    None,
+                    semantic_backend.name(),
+                    &semantic_backend
+                        .embed_text(&format!("{} {} {}", file.path, imports_text, source))?,
+                )?;
+                inserted_vectors += 1;
+            } else {
+                reused_vectors += 1;
+            }
+        }
         for symbol in db.get_symbols_by_file(file.id)? {
             let Some(symbol_id) = symbol.id else {
                 continue;
@@ -820,24 +938,44 @@ fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
                 &imports_text,
                 "",
             )?;
-            db.insert_search_vector(
-                symbol_id,
-                &file.path,
-                &symbol.kind,
-                &symbol.name,
-                symbol.signature.as_deref(),
-                semantic_backend.name(),
-                &semantic_backend.embed_text(&format!(
-                    "{} {} {} {}",
-                    symbol.name,
-                    symbol.signature.as_deref().unwrap_or(""),
-                    symbol.doc_comment.as_deref().unwrap_or(""),
-                    imports_text
-                ))?,
-            )?;
+            if let Some(semantic_backend) = semantic_backend.as_ref() {
+                if options.reembed_all
+                    || !db.has_search_vector(symbol_id, semantic_backend.name())?
+                {
+                    db.insert_search_vector(
+                        symbol_id,
+                        &file.path,
+                        &symbol.kind,
+                        &symbol.name,
+                        symbol.signature.as_deref(),
+                        semantic_backend.name(),
+                        &semantic_backend.embed_text(&format!(
+                            "{} {} {} {}",
+                            symbol.name,
+                            symbol.signature.as_deref().unwrap_or(""),
+                            symbol.doc_comment.as_deref().unwrap_or(""),
+                            imports_text
+                        ))?,
+                    )?;
+                    inserted_vectors += 1;
+                } else {
+                    reused_vectors += 1;
+                }
+            }
         }
     }
-    db.set_config("semantic_backend", semantic_backend.name())?;
+    if let Some(semantic_backend) = semantic_backend.as_ref() {
+        db.prune_search_vectors_to_index(semantic_backend.name())?;
+        db.set_config("semantic_backend", semantic_backend.name())?;
+        info!(
+            "Search index refreshed with backend {} ({} vectors inserted, {} reused).",
+            semantic_backend.name(),
+            inserted_vectors,
+            reused_vectors
+        );
+    } else {
+        info!("Search index refreshed without semantic vectors.");
+    }
     Ok(())
 }
 
@@ -873,9 +1011,13 @@ impl SemanticBackend {
     }
 }
 
-fn configured_semantic_backend(db: &CacheDb) -> anyhow::Result<SemanticBackend> {
-    let backend_name = env::var("REPOSCRY_SEMANTIC_BACKEND")
-        .ok()
+fn configured_semantic_backend(
+    db: &CacheDb,
+    override_backend: Option<&str>,
+) -> anyhow::Result<SemanticBackend> {
+    let backend_name = override_backend
+        .map(str::to_string)
+        .or_else(|| env::var("REPOSCRY_SEMANTIC_BACKEND").ok())
         .or_else(|| db.get_config("semantic_backend").ok().flatten())
         .unwrap_or_else(|| LOCAL_SEMANTIC_BACKEND.to_string());
     match backend_name.as_str() {
@@ -1081,24 +1223,22 @@ fn rebuild_persisted_import_edges(db: &CacheDb) -> anyhow::Result<()> {
 
 fn rebuild_persisted_call_edges(db: &CacheDb) -> anyhow::Result<()> {
     let files = db.get_all_files()?;
+    let files_by_id: HashMap<i64, &CachedFile> = files.iter().map(|file| (file.id, file)).collect();
     let mut symbols_by_file = HashMap::new();
+    let mut imports_by_file = HashMap::new();
     let mut global_symbol_candidates: HashMap<String, Vec<reposcry_graph::symbol::Symbol>> =
         HashMap::new();
     for file in &files {
         let symbols = db.get_symbols_by_file(file.id)?;
+        let imports = db.get_imports_by_file(file.id)?;
         for symbol in &symbols {
-            global_symbol_candidates
-                .entry(symbol.name.clone())
-                .or_default()
-                .push(symbol.clone());
+            push_global_symbol_candidate(&mut global_symbol_candidates, &symbol.name, symbol);
             if let Some(short) = symbol.name.rsplit("::").next() {
-                global_symbol_candidates
-                    .entry(short.to_string())
-                    .or_default()
-                    .push(symbol.clone());
+                push_global_symbol_candidate(&mut global_symbol_candidates, short, symbol);
             }
         }
         symbols_by_file.insert(file.id, symbols);
+        imports_by_file.insert(file.id, imports);
     }
 
     db.clear_edges_by_kind(EdgeKind::Calls)?;
@@ -1111,12 +1251,25 @@ fn rebuild_persisted_call_edges(db: &CacheDb) -> anyhow::Result<()> {
         let Some(file_symbols) = symbols_by_file.get(&file.id) else {
             continue;
         };
+        let file_imports = imports_by_file
+            .get(&file.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let Some(source_file) = files_by_id.get(&file.id) else {
+            continue;
+        };
         for call_site in &call_sites {
             let Some(source_symbol) = resolve_caller_symbol(file_symbols, call_site) else {
                 continue;
             };
-            let Some((target_symbol, strategy)) =
-                resolve_callee_symbol(file_symbols, &global_symbol_candidates, call_site)
+            let Some((target_symbol, strategy)) = resolve_callee_symbol(
+                file_symbols,
+                &global_symbol_candidates,
+                file_imports,
+                &source_file.path,
+                &files,
+                call_site,
+            )
             else {
                 continue;
             };
@@ -1171,6 +1324,24 @@ fn rebuild_persisted_call_edges(db: &CacheDb) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn push_global_symbol_candidate(
+    global_symbol_candidates: &mut HashMap<String, Vec<reposcry_graph::symbol::Symbol>>,
+    key: &str,
+    symbol: &reposcry_graph::symbol::Symbol,
+) {
+    let entry = global_symbol_candidates
+        .entry(key.to_string())
+        .or_default();
+    if entry.iter().any(|candidate| {
+        candidate.id == symbol.id
+            && candidate.file_path == symbol.file_path
+            && candidate.name == symbol.name
+    }) {
+        return;
+    }
+    entry.push(symbol.clone());
+}
+
 fn resolve_caller_symbol<'a>(
     file_symbols: &'a [reposcry_graph::symbol::Symbol],
     call_site: &CachedCallSite,
@@ -1192,6 +1363,9 @@ fn resolve_caller_symbol<'a>(
 fn resolve_callee_symbol(
     file_symbols: &[reposcry_graph::symbol::Symbol],
     global_symbol_candidates: &HashMap<String, Vec<reposcry_graph::symbol::Symbol>>,
+    file_imports: &[CachedImport],
+    source_path: &str,
+    files: &[CachedFile],
     call_site: &CachedCallSite,
 ) -> Option<(reposcry_graph::symbol::Symbol, String)> {
     if let Some(symbol) = file_symbols.iter().find(|symbol| {
@@ -1200,17 +1374,63 @@ fn resolve_callee_symbol(
     }) {
         return Some((symbol.clone(), "same_file".to_string()));
     }
-    let candidates = global_symbol_candidates.get(&call_site.callee)?;
+    let candidates = dedup_symbol_candidates(global_symbol_candidates.get(&call_site.callee)?);
     if candidates.len() == 1 {
         return Some((candidates[0].clone(), "unique_global".to_string()));
     }
+    let resolved_import_targets =
+        resolved_import_target_paths(file_imports, source_path, files, &call_site.callee);
+    let import_candidates: Vec<_> = candidates
+        .into_iter()
+        .filter(|candidate| resolved_import_targets.contains(&candidate.file_path))
+        .collect();
+    if import_candidates.len() == 1 {
+        return Some((import_candidates[0].clone(), "import_resolved".to_string()));
+    }
     None
+}
+
+fn dedup_symbol_candidates(
+    candidates: &[reposcry_graph::symbol::Symbol],
+) -> Vec<reposcry_graph::symbol::Symbol> {
+    let mut deduped = Vec::new();
+    for candidate in candidates {
+        if deduped.iter().any(|existing: &reposcry_graph::symbol::Symbol| {
+            existing.id == candidate.id
+                && existing.file_path == candidate.file_path
+                && existing.name == candidate.name
+        }) {
+            continue;
+        }
+        deduped.push(candidate.clone());
+    }
+    deduped
+}
+
+fn resolved_import_target_paths(
+    file_imports: &[CachedImport],
+    source_path: &str,
+    files: &[CachedFile],
+    callee: &str,
+) -> HashSet<String> {
+    file_imports
+        .iter()
+        .filter(|import| {
+            import.imported_names.is_empty()
+                || import
+                    .imported_names
+                    .iter()
+                    .filter_map(|name| name.strip_prefix("* as ").or(Some(name.as_str())))
+                    .any(|name| name == callee)
+        })
+        .filter_map(|import| resolve_import_target(source_path, &import.target, files))
+        .collect()
 }
 
 fn resolve_import_target(
     source_path: &str,
     raw_target: &str,
-    files: &[reposcry_cache::db::CachedFile],
+    files: &[CachedFile],
 ) -> Option<String> {
     let raw_target = raw_target
         .trim()
@@ -1239,7 +1459,58 @@ fn resolve_import_target(
     if let Some(rest) = raw_target.strip_prefix("~/") {
         return find_candidate_path(rest, &file_paths);
     }
+    if let Some(resolved) = resolve_workspace_package_import_target(raw_target, &file_paths) {
+        return Some(resolved);
+    }
     resolve_rust_import_target(source_path, raw_target, &file_paths)
+}
+
+fn resolve_workspace_package_import_target(
+    raw_target: &str,
+    file_paths: &HashSet<&str>,
+) -> Option<String> {
+    let segments: Vec<&str> = raw_target.split('/').filter(|segment| !segment.is_empty()).collect();
+    if segments.is_empty() {
+        return None;
+    }
+
+    let (package_name, subpath_segments): (&str, &[&str]) = if raw_target.starts_with('@') {
+        if segments.len() < 2 {
+            return None;
+        }
+        (segments[1], &segments[2..])
+    } else {
+        (segments[0], &segments[1..])
+    };
+
+    let candidate_roots = [
+        format!("packages/{}", package_name),
+        format!("apps/{}", package_name),
+        format!("crates/{}", package_name),
+        package_name.to_string(),
+    ];
+
+    for root in candidate_roots {
+        if subpath_segments.is_empty() {
+            if let Some(resolved) = find_candidate_path(&format!("{}/src/index", root), file_paths) {
+                return Some(resolved);
+            }
+            if let Some(resolved) = find_candidate_path(&format!("{}/index", root), file_paths) {
+                return Some(resolved);
+            }
+            continue;
+        }
+
+        let subpath = subpath_segments.join("/");
+        if let Some(resolved) = find_candidate_path(&format!("{}/src/{}", root, subpath), file_paths) {
+            return Some(resolved);
+        }
+        if let Some(resolved) = find_candidate_path(&format!("{}/{}", root, subpath), file_paths) {
+            return Some(resolved);
+        }
+    }
+
+    None
 }
 
 fn resolve_rust_import_target(
@@ -1882,7 +2153,8 @@ fn rebuild_graph(db: &CacheDb) -> anyhow::Result<CodeGraph> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reposcry_cache::db::CachedFile;
+    use reposcry_cache::db::{CachedCallSite, CachedFile, CachedImport};
+    use reposcry_graph::symbol::Symbol;
 
     fn file(id: i64, path: &str) -> CachedFile {
         CachedFile {
@@ -1928,5 +2200,103 @@ mod tests {
             resolved.as_deref(),
             Some("crates/reposcry-graph/src/edge.rs")
         );
+    }
+
+    #[test]
+    fn resolves_workspace_package_import_to_source_index() {
+        let files = vec![
+            file(1, "apps/web/lib/graph.ts"),
+            file(2, "packages/shared/src/index.ts"),
+            file(3, "packages/graph/src/rebuild.ts"),
+        ];
+        let package_root = resolve_import_target("apps/web/lib/graph.ts", "@mixed/shared", &files);
+        let package_subpath =
+            resolve_import_target("apps/web/lib/graph.ts", "@large/graph/rebuild", &files);
+        assert_eq!(package_root.as_deref(), Some("packages/shared/src/index.ts"));
+        assert_eq!(package_subpath.as_deref(), Some("packages/graph/src/rebuild.ts"));
+    }
+
+    fn symbol(id: i64, file_path: &str, name: &str, start_line: u32, end_line: u32) -> Symbol {
+        Symbol {
+            id: Some(id),
+            file_path: file_path.to_string(),
+            name: name.to_string(),
+            kind: "function".to_string(),
+            start_line,
+            end_line,
+            signature: None,
+            visibility: None,
+            doc_comment: None,
+        }
+    }
+
+    #[test]
+    fn resolves_unique_global_callee_even_if_short_name_was_inserted_twice() {
+        let target = symbol(7, "lib/graph.ts", "rebuild_graph", 3, 8);
+        let mut candidates = HashMap::new();
+        push_global_symbol_candidate(&mut candidates, "rebuild_graph", &target);
+        push_global_symbol_candidate(&mut candidates, "rebuild_graph", &target);
+
+        let call_site = CachedCallSite {
+            id: 1,
+            file_id: 1,
+            caller: "refreshGraph".to_string(),
+            callee: "rebuild_graph".to_string(),
+            line: 6,
+            confidence: 0.8,
+            resolution_strategy: Some("ast_ts_call".to_string()),
+        };
+
+        let resolved = resolve_callee_symbol(&[], &candidates, &[], "app/actions.ts", &[], &call_site);
+        let (resolved_symbol, strategy) = resolved.expect("expected unique global resolution");
+        assert_eq!(resolved_symbol.file_path, "lib/graph.ts");
+        assert_eq!(resolved_symbol.name, "rebuild_graph");
+        assert_eq!(strategy, "unique_global");
+    }
+
+    #[test]
+    fn resolves_callee_using_import_target_when_global_name_is_ambiguous() {
+        let ts_symbol = symbol(7, "packages/shared/src/index.ts", "rebuild_graph", 5, 7);
+        let rust_symbol = symbol(8, "crates/worker/src/graph.rs", "rebuild_graph", 1, 3);
+        let mut candidates = HashMap::new();
+        push_global_symbol_candidate(&mut candidates, "rebuild_graph", &ts_symbol);
+        push_global_symbol_candidate(&mut candidates, "rebuild_graph", &rust_symbol);
+
+        let imports = vec![CachedImport {
+            id: 1,
+            file_id: 2,
+            source: "apps/web/lib/graph.ts".to_string(),
+            target: "@mixed/shared".to_string(),
+            is_relative: false,
+            imported_names: vec!["read_cache".to_string(), "rebuild_graph".to_string()],
+            line: 1,
+        }];
+        let files = vec![
+            file(1, "apps/web/lib/graph.ts"),
+            file(2, "packages/shared/src/index.ts"),
+            file(3, "crates/worker/src/graph.rs"),
+        ];
+        let call_site = CachedCallSite {
+            id: 1,
+            file_id: 1,
+            caller: "rebuildGraphView".to_string(),
+            callee: "rebuild_graph".to_string(),
+            line: 4,
+            confidence: 0.8,
+            resolution_strategy: Some("ast_ts_call".to_string()),
+        };
+
+        let resolved = resolve_callee_symbol(
+            &[],
+            &candidates,
+            &imports,
+            "apps/web/lib/graph.ts",
+            &files,
+            &call_site,
+        );
+        let (resolved_symbol, strategy) = resolved.expect("expected import-based resolution");
+        assert_eq!(resolved_symbol.file_path, "packages/shared/src/index.ts");
+        assert_eq!(resolved_symbol.name, "rebuild_graph");
+        assert_eq!(strategy, "import_resolved");
     }
 }

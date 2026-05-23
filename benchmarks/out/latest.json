@@ -1,5 +1,5 @@
 ﻿{
-    "captured_at":  "2026-05-23T13:50:32.6867705Z",
+    "captured_at":  "2026-05-23T16:04:50.9926013Z",
     "machine":  {
                     "os":  "Microsoft Windows [version 10.0.26200.8457]",
                     "cpu":  "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
@@ -8,24 +8,28 @@
     "repo":  {
                  "path":  "F:\\CODING\\2-PROJETS-EN-COURS\\CodeReviewGraphX",
                  "fixture":  "current_repo",
+                 "size":  "small_rust_workspace",
+                 "notes":  "Primary smoke and regression fixture committed with the repository.",
                  "fixture_manifest":  "benchmarks/fixtures.json"
              },
     "metrics":  {
-                    "cold_index_ms":  10919,
-                    "warm_index_ms":  8249,
-                    "call_warmup_ms":  2517,
-                    "architecture_overview_ms":  59,
-                    "detect_changes_ms":  152,
-                    "affected_flows_ms":  143,
-                    "query_graph_callers_ms":  38,
-                    "semantic_search_ms":  233,
-                    "db_size_bytes":  1908736,
-                    "files_indexed":  47,
-                    "symbols_indexed":  423,
-                    "imports_indexed":  127,
-                    "persisted_call_sites":  3680,
-                    "persisted_symbol_call_edges":  690,
-                    "persisted_file_call_edges":  31,
-                    "total_edges":  60
+                    "cold_index_ms":  10655,
+                    "warm_index_ms":  7599,
+                    "semantic_index_reuse_ms":  5669,
+                    "semantic_index_reembed_ms":  5148,
+                    "call_warmup_ms":  4241,
+                    "architecture_overview_ms":  113,
+                    "detect_changes_ms":  188,
+                    "affected_flows_ms":  177,
+                    "query_graph_callers_ms":  79,
+                    "semantic_search_ms":  498,
+                    "db_size_bytes":  3305472,
+                    "files_indexed":  103,
+                    "symbols_indexed":  618,
+                    "imports_indexed":  175,
+                    "persisted_call_sites":  5757,
+                    "persisted_symbol_call_edges":  1084,
+                    "persisted_file_call_edges":  56,
+                    "total_edges":  95
                 }
 }

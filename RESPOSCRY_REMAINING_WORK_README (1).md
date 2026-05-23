@@ -6,7 +6,7 @@ This README tracks the remaining work needed to move RepoScry from a CRG-compati
 
 Implemented so far:
 
-- `reposcry-crg` compatibility binary.
+- Canonical `reposcry` CLI with CRG-compatible commands.
 - CRG-style commands:
   - `detect_changes`
   - `get_review_context`
@@ -20,8 +20,8 @@ Implemented so far:
 - Minimal MCP-compatible stdio mode.
 - Runtime heuristic `Calls` edges.
 - Persistent `calls` table in SQLite.
-- `reposcry-warm-calls` call-site warmup binary.
-- `reposcry-index-full` wrapper.
+- `reposcry warm-calls` call-site warmup command.
+- `reposcry index-full` wrapper command.
 - Basic CI workflow.
 - Basic benchmark script.
 
@@ -29,7 +29,7 @@ Remaining work is mostly about accuracy, persistence quality, search quality, fl
 
 ---
 
-## Phase 1 — Make the current implementation compile and pass CI
+## Phase 1 - Make the current implementation compile and pass CI
 
 ### Goal
 
@@ -45,9 +45,9 @@ cargo test --workspace --all-targets
 ```
 
 - Fix any compiler errors from:
-  - new binaries
+  - new commands
   - `reposcry-cache` DB additions
-  - `reposcry-crg` command changes
+  - graph/review command changes
   - missing imports or trait bounds
   - enum/hash usage on `EdgeKind`
 
@@ -55,33 +55,33 @@ cargo test --workspace --all-targets
 
 ```bash
 cargo install --path crates/reposcry-cli --force
-reposcry-index-full --repo .
+reposcry --repo . index-full
 ```
 
 - Run smoke tests:
 
 ```bash
-reposcry-crg --repo . get_architecture_overview --format json
-reposcry-crg --repo . query_graph "callers_of rebuild_graph"
-reposcry-crg --repo . query_graph "callees_of detect_changes"
-reposcry-crg --repo . get_impact_radius rebuild_graph --depth 4
+reposcry --repo . get_architecture_overview --format json
+reposcry --repo . query_graph "callers_of rebuild_graph"
+reposcry --repo . query_graph "callees_of detect_changes"
+reposcry --repo . get_impact_radius rebuild_graph --depth 4
 ```
 
 ### Acceptance criteria
 
 - `cargo check --workspace --all-targets` passes.
 - `cargo test --workspace --all-targets` passes.
-- `reposcry-index-full --repo .` produces JSON with successful steps.
-- `reposcry-crg get_architecture_overview` includes nonzero indexed data.
+- `reposcry --repo . index-full` produces JSON with successful steps.
+- `reposcry get_architecture_overview` includes nonzero indexed data.
 - CI is green on GitHub Actions.
 
 ---
 
-## Phase 2 — Persist symbol-level call edges
+## Phase 2 - Persist symbol-level call edges
 
 ### Current limitation
 
-`reposcry-warm-calls` persists call sites and file-level `Calls` edges. `reposcry-crg` still reconstructs symbol-level call edges at runtime.
+`reposcry warm-calls` persists call sites and file-level `Calls` edges. `reposcry` still reconstructs symbol-level call edges at runtime.
 
 ### Goal
 
@@ -121,16 +121,16 @@ CREATE TABLE IF NOT EXISTS symbol_edges (
   - `symbol_edge_count`
   - `clear_symbol_edges_by_kind`
 
-- Update `reposcry-warm-calls` to persist both:
+- Update `reposcry warm-calls` to persist both:
   - call-site rows
   - file-level call edges
   - symbol-level call edges
 
-- Update `reposcry-crg` to prefer persisted symbol-level call edges and only use runtime inference as fallback.
+- Update `reposcry` to prefer persisted symbol-level call edges and only use runtime inference as fallback.
 
 ### Acceptance criteria
 
-- `reposcry-crg query_graph "callers_of X"` works without rescanning every source file.
+- `reposcry query_graph "callers_of X"` works without rescanning every source file.
 - `get_architecture_overview` reports:
   - persisted call sites
   - persisted file call edges
@@ -138,12 +138,12 @@ CREATE TABLE IF NOT EXISTS symbol_edges (
 - Runtime call inference can be disabled with a flag, for example:
 
 ```bash
-reposcry-crg query_graph "callers_of rebuild_graph" --no-runtime-calls
+reposcry query_graph "callers_of rebuild_graph" --no-runtime-calls
 ```
 
 ---
 
-## Phase 3 — Replace lexical call scanning with AST call extraction
+## Phase 3 - Replace lexical call scanning with AST call extraction
 
 ### Current limitation
 
@@ -220,7 +220,7 @@ MyClass()
 
 ---
 
-## Phase 4 — Add SQLite FTS5 search
+## Phase 4 - Add SQLite FTS5 search
 
 ### Current limitation
 
@@ -262,14 +262,14 @@ search_nodes_fts(query, kind, limit)
 ### Acceptance criteria
 
 ```bash
-reposcry-crg semantic_search_nodes "cache database calls" --limit 20
+reposcry semantic_search_nodes "cache database calls" --limit 20
 ```
 
 returns higher-quality results than plain substring scoring.
 
 ---
 
-## Phase 5 — Add optional embeddings / hybrid search
+## Phase 5 - Add optional embeddings / hybrid search
 
 ### Goal
 
@@ -298,7 +298,7 @@ Improve semantic search without making RepoScry dependent on cloud services.
 
 ---
 
-## Phase 6 — Stronger affected flow graph
+## Phase 6 - Stronger affected flow graph
 
 ### Current limitation
 
@@ -362,7 +362,7 @@ Add explicit flow detectors:
 
 ---
 
-## Phase 7 — Better test intelligence
+## Phase 7 - Better test intelligence
 
 ### Current limitation
 
@@ -383,13 +383,7 @@ Suggest the minimum useful test set for a change.
 - Add command:
 
 ```bash
-reposcry-crg tests_for "createOrder"
-```
-
-or support:
-
-```bash
-reposcry-crg query_graph "tests_for createOrder"
+reposcry query_graph "tests_for createOrder"
 ```
 
 - Add suggested commands:
@@ -405,7 +399,7 @@ reposcry-crg query_graph "tests_for createOrder"
 
 ---
 
-## Phase 8 — Improve refactor planner
+## Phase 8 - Improve refactor planner
 
 ### Current limitation
 
@@ -420,10 +414,10 @@ Make it useful enough to plan safe refactors.
 Implement actions:
 
 ```bash
-reposcry-crg refactor_tool rename OldName NewName
-reposcry-crg refactor_tool dead-code
-reposcry-crg refactor_tool split-file path/to/file.rs
-reposcry-crg refactor_tool public-api-change main HEAD
+reposcry refactor_tool rename OldName NewName
+reposcry refactor_tool dead-code
+reposcry refactor_tool split-file path/to/file.rs
+reposcry refactor_tool public-api-change main HEAD
 ```
 
 For rename:
@@ -460,7 +454,7 @@ For split-file:
 
 ---
 
-## Phase 9 — Harden MCP server
+## Phase 9 - Harden MCP server
 
 ### Current limitation
 
@@ -482,8 +476,8 @@ Make it robust enough for real agent usage.
 {
   "mcpServers": {
     "reposcry": {
-      "command": "reposcry-crg",
-      "args": ["mcp", "--repo", "/path/to/repo"]
+      "command": "reposcry",
+      "args": ["--repo", "/path/to/repo", "mcp"]
     }
   }
 }
@@ -504,7 +498,7 @@ Make it robust enough for real agent usage.
 
 ---
 
-## Phase 10 — Performance and correctness benchmarks
+## Phase 10 - Performance and correctness benchmarks
 
 ### Goal
 
@@ -542,7 +536,7 @@ Add benchmark fixtures:
 
 ---
 
-## Phase 11 — Documentation and release polish
+## Phase 11 - Documentation and release polish
 
 ### Tasks
 
@@ -562,10 +556,8 @@ Add benchmark fixtures:
   - crate version if published
   - license
 - Decide package naming:
-  - `reposcry`
-  - `reposcry-crg`
-  - `reposcry-index-full`
-  - `reposcry-warm-calls`
+  - single installed CLI: `reposcry`
+  - subcommands for indexing, call warmup, graph queries, MCP, and refactor planning
 
 ### Acceptance criteria
 
@@ -575,7 +567,7 @@ Add benchmark fixtures:
 
 ---
 
-## Phase 12 — Release pipeline
+## Phase 12 - Release pipeline
 
 ### Tasks
 
@@ -622,15 +614,15 @@ cargo test --workspace --all-targets
 
 ```bash
 cargo install --path crates/reposcry-cli --force
-reposcry-index-full --repo .
+reposcry --repo . index-full
 ```
 
 5. Verify:
 
 ```bash
-reposcry-crg --repo . get_architecture_overview --format json
-reposcry-crg --repo . query_graph "callers_of rebuild_graph"
-reposcry-crg --repo . query_graph "callees_of detect_changes"
+reposcry --repo . get_architecture_overview --format json
+reposcry --repo . query_graph "callers_of rebuild_graph"
+reposcry --repo . query_graph "callees_of detect_changes"
 ```
 
 6. Only after build/test are green, continue with:
