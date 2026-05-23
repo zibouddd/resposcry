@@ -197,8 +197,10 @@ pub fn install_platform(
         }
         return Ok(combined);
     }
+
     let mut summary = InstallSummary::default();
     install_common_files(repo_root, platform, options, &mut summary)?;
+
     match platform {
         InstallPlatform::Claude => install_claude(repo_root, false, options, &mut summary)?,
         InstallPlatform::Windows => install_claude(repo_root, true, options, &mut summary)?,
@@ -207,68 +209,21 @@ pub fn install_platform(
         InstallPlatform::Copilot => install_copilot(repo_root, options, &mut summary)?,
         InstallPlatform::Vscode => install_vscode(repo_root, options, &mut summary)?,
         InstallPlatform::Aider => install_aider(repo_root, options, &mut summary)?,
-        InstallPlatform::Claw => install_agent_directory(
-            repo_root,
-            platform,
-            ".claw/reposcry.md",
-            options,
-            &mut summary,
-        )?,
-        InstallPlatform::Droid => install_agent_directory(
-            repo_root,
-            platform,
-            ".factory/droid/reposcry.md",
-            options,
-            &mut summary,
-        )?,
-        InstallPlatform::Trae => install_agent_directory(
-            repo_root,
-            platform,
-            ".trae/rules/reposcry.md",
-            options,
-            &mut summary,
-        )?,
-        InstallPlatform::TraeCn => install_agent_directory(
-            repo_root,
-            platform,
-            ".trae-cn/rules/reposcry.md",
-            options,
-            &mut summary,
-        )?,
         InstallPlatform::Gemini => install_gemini(repo_root, options, &mut summary)?,
-        InstallPlatform::Hermes => install_agent_directory(
-            repo_root,
-            platform,
-            ".hermes/reposcry.md",
-            options,
-            &mut summary,
-        )?,
-        InstallPlatform::Kimi => install_agent_directory(
-            repo_root,
-            platform,
-            ".kimi/reposcry.md",
-            options,
-            &mut summary,
-        )?,
         InstallPlatform::Kiro => install_kiro(repo_root, options, &mut summary)?,
-        InstallPlatform::Pi => install_agent_directory(
-            repo_root,
-            platform,
-            ".pi/reposcry.md",
-            options,
-            &mut summary,
-        )?,
         InstallPlatform::Cursor => install_cursor(repo_root, options, &mut summary)?,
-        InstallPlatform::Antigravity => install_agent_directory(
-            repo_root,
-            platform,
-            ".antigravity/instructions/reposcry.md",
-            options,
-            &mut summary,
-        )?,
         InstallPlatform::Hooks => install_hooks(repo_root, options, &mut summary)?,
+        InstallPlatform::Claw => install_agent_directory(repo_root, platform, ".claw/reposcry.md", options, &mut summary)?,
+        InstallPlatform::Droid => install_agent_directory(repo_root, platform, ".factory/droid/reposcry.md", options, &mut summary)?,
+        InstallPlatform::Trae => install_agent_directory(repo_root, platform, ".trae/rules/reposcry.md", options, &mut summary)?,
+        InstallPlatform::TraeCn => install_agent_directory(repo_root, platform, ".trae-cn/rules/reposcry.md", options, &mut summary)?,
+        InstallPlatform::Hermes => install_agent_directory(repo_root, platform, ".hermes/reposcry.md", options, &mut summary)?,
+        InstallPlatform::Kimi => install_agent_directory(repo_root, platform, ".kimi/reposcry.md", options, &mut summary)?,
+        InstallPlatform::Pi => install_agent_directory(repo_root, platform, ".pi/reposcry.md", options, &mut summary)?,
+        InstallPlatform::Antigravity => install_agent_directory(repo_root, platform, ".antigravity/instructions/reposcry.md", options, &mut summary)?,
         InstallPlatform::All => unreachable!(),
     }
+
     Ok(summary)
 }
 
@@ -278,310 +233,82 @@ fn install_common_files(
     options: InstallOptions,
     summary: &mut InstallSummary,
 ) -> Result<()> {
-    let core = core_agent_instructions(platform);
-    write_file(
-        repo_root,
-        ".reposcry/agents/common.md",
-        &core_agent_instructions(InstallPlatform::Claude),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        PathBuf::from(format!(".reposcry/agents/{}.md", platform.slug())),
-        &core,
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".reposcry/skills/code-review-graph/SKILL.md",
-        &skill_file(),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".reposcry/hooks/pre-edit.md",
-        &pre_edit_hook(),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".reposcry/hooks/post-edit.md",
-        &post_edit_hook(),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        "scripts/reposcry-context.sh",
-        &shell_context_script(),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        "scripts/reposcry-validate.sh",
-        &shell_validate_script(),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        "scripts/reposcry-context.ps1",
-        &powershell_context_script(),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        "scripts/reposcry-validate.ps1",
-        &powershell_validate_script(),
-        options,
-        summary,
-    )?;
-    upsert_hash_marked_block(
-        repo_root,
-        ".gitignore",
-        "gitignore",
-        gitignore_block(),
-        options,
-        summary,
-    )?;
+    write_file(repo_root, ".reposcry/agents/common.md", &core_agent_instructions(InstallPlatform::Claude), options, summary)?;
+    write_file(repo_root, PathBuf::from(format!(".reposcry/agents/{}.md", platform.slug())), &core_agent_instructions(platform), options, summary)?;
+    write_file(repo_root, ".reposcry/skills/code-review-graph/SKILL.md", &skill_file(), options, summary)?;
+    write_file(repo_root, ".reposcry/hooks/pre-edit.md", &pre_edit_hook(), options, summary)?;
+    write_file(repo_root, ".reposcry/hooks/post-edit.md", &post_edit_hook(), options, summary)?;
+    write_file(repo_root, "scripts/reposcry-context.sh", &shell_context_script(), options, summary)?;
+    write_file(repo_root, "scripts/reposcry-update.sh", &shell_update_script(), options, summary)?;
+    write_file(repo_root, "scripts/reposcry-validate.sh", &shell_validate_script(), options, summary)?;
+    write_file(repo_root, "scripts/reposcry-context.ps1", &powershell_context_script(), options, summary)?;
+    write_file(repo_root, "scripts/reposcry-update.ps1", &powershell_update_script(), options, summary)?;
+    write_file(repo_root, "scripts/reposcry-validate.ps1", &powershell_validate_script(), options, summary)?;
+    upsert_hash_marked_block(repo_root, ".gitignore", "gitignore", gitignore_block(), options, summary)?;
     Ok(())
 }
 
-fn install_claude(
-    repo_root: &Path,
-    windows: bool,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    let platform = if windows {
-        InstallPlatform::Windows
-    } else {
-        InstallPlatform::Claude
-    };
-    upsert_marked_block(
-        repo_root,
-        "CLAUDE.md",
-        "claude",
-        &core_agent_instructions(platform),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".claude/commands/reposcry-context.md",
-        &claude_command("context", windows),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".claude/commands/reposcry-review.md",
-        &claude_command("review", windows),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".claude/commands/reposcry-validate.md",
-        &claude_command("validate", windows),
-        options,
-        summary,
-    )?;
+fn install_claude(repo_root: &Path, windows: bool, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    let platform = if windows { InstallPlatform::Windows } else { InstallPlatform::Claude };
+    upsert_marked_block(repo_root, "CLAUDE.md", "claude", &core_agent_instructions(platform), options, summary)?;
+    write_file(repo_root, ".claude/commands/reposcry-context.md", &claude_command("context", windows), options, summary)?;
+    write_file(repo_root, ".claude/commands/reposcry-update.md", &claude_command("update", windows), options, summary)?;
+    write_file(repo_root, ".claude/commands/reposcry-review.md", &claude_command("review", windows), options, summary)?;
+    write_file(repo_root, ".claude/commands/reposcry-validate.md", &claude_command("validate", windows), options, summary)?;
     Ok(())
 }
 
-fn install_agents_md(
-    repo_root: &Path,
-    platform: InstallPlatform,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    upsert_marked_block(
-        repo_root,
-        "AGENTS.md",
-        platform.slug(),
-        &core_agent_instructions(platform),
-        options,
-        summary,
-    )
+fn install_agents_md(repo_root: &Path, platform: InstallPlatform, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    upsert_marked_block(repo_root, "AGENTS.md", platform.slug(), &core_agent_instructions(platform), options, summary)
 }
 
-fn install_opencode(
-    repo_root: &Path,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
+fn install_opencode(repo_root: &Path, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
     install_agents_md(repo_root, InstallPlatform::Opencode, options, summary)?;
-    write_file(
-        repo_root,
-        ".opencode/AGENTS.md",
-        &core_agent_instructions(InstallPlatform::Opencode),
-        options,
-        summary,
-    )
+    write_file(repo_root, ".opencode/AGENTS.md", &core_agent_instructions(InstallPlatform::Opencode), options, summary)
 }
 
-fn install_copilot(
-    repo_root: &Path,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    upsert_marked_block(
-        repo_root,
-        ".github/copilot-instructions.md",
-        "copilot",
-        &core_agent_instructions(InstallPlatform::Copilot),
-        options,
-        summary,
-    )
+fn install_copilot(repo_root: &Path, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    upsert_marked_block(repo_root, ".github/copilot-instructions.md", "copilot", &core_agent_instructions(InstallPlatform::Copilot), options, summary)
 }
 
-fn install_vscode(
-    repo_root: &Path,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
+fn install_vscode(repo_root: &Path, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
     install_copilot(repo_root, options, summary)?;
-    write_file(
-        repo_root,
-        ".vscode/reposcry-copilot-instructions.md",
-        &core_agent_instructions(InstallPlatform::Vscode),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".vscode/settings.json",
-        &vscode_settings(),
-        InstallOptions {
-            force: options.force,
-            dry_run: options.dry_run,
-        },
-        summary,
-    )
+    write_file(repo_root, ".vscode/reposcry-copilot-instructions.md", &core_agent_instructions(InstallPlatform::Vscode), options, summary)?;
+    write_file(repo_root, ".vscode/settings.json", &vscode_settings(), options, summary)
 }
 
-fn install_aider(
-    repo_root: &Path,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    write_file(
-        repo_root,
-        ".aider.reposcry.md",
-        &core_agent_instructions(InstallPlatform::Aider),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".aider.conf.yml",
-        &aider_config(),
-        InstallOptions {
-            force: options.force,
-            dry_run: options.dry_run,
-        },
-        summary,
-    )
+fn install_aider(repo_root: &Path, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    write_file(repo_root, ".aider.reposcry.md", &core_agent_instructions(InstallPlatform::Aider), options, summary)?;
+    write_file(repo_root, ".aider.conf.yml", &aider_config(), options, summary)
 }
 
-fn install_gemini(
-    repo_root: &Path,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    upsert_marked_block(
-        repo_root,
-        "GEMINI.md",
-        "gemini",
-        &core_agent_instructions(InstallPlatform::Gemini),
-        options,
-        summary,
-    )
+fn install_gemini(repo_root: &Path, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    upsert_marked_block(repo_root, "GEMINI.md", "gemini", &core_agent_instructions(InstallPlatform::Gemini), options, summary)
 }
 
-fn install_kiro(
-    repo_root: &Path,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    write_file(
-        repo_root,
-        ".kiro/steering/reposcry.md",
-        &core_agent_instructions(InstallPlatform::Kiro),
-        options,
-        summary,
-    )
+fn install_kiro(repo_root: &Path, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    write_file(repo_root, ".kiro/steering/reposcry.md", &core_agent_instructions(InstallPlatform::Kiro), options, summary)
 }
 
-fn install_cursor(
-    repo_root: &Path,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    write_file(
-        repo_root,
-        ".cursor/rules/reposcry-context.mdc",
-        &cursor_rule(),
-        options,
-        summary,
-    )?;
+fn install_cursor(repo_root: &Path, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    write_file(repo_root, ".cursor/rules/reposcry-context.mdc", &cursor_rule(), options, summary)?;
     install_agents_md(repo_root, InstallPlatform::Cursor, options, summary)
 }
 
-fn install_agent_directory(
-    repo_root: &Path,
-    platform: InstallPlatform,
-    path: &str,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    write_file(
-        repo_root,
-        path,
-        &core_agent_instructions(platform),
-        options,
-        summary,
-    )
+fn install_agent_directory(repo_root: &Path, platform: InstallPlatform, path: &str, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    write_file(repo_root, path, &core_agent_instructions(platform), options, summary)
 }
 
-fn install_hooks(
-    repo_root: &Path,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
-    write_file(
-        repo_root,
-        ".githooks/pre-commit",
-        &git_pre_commit_hook(),
-        options,
-        summary,
-    )?;
-    write_file(
-        repo_root,
-        ".reposcry/hooks/README.md",
-        &hooks_readme(),
-        options,
-        summary,
-    )
+fn install_hooks(repo_root: &Path, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    write_file(repo_root, ".githooks/pre-commit", &git_pre_commit_hook(), options, summary)?;
+    write_file(repo_root, ".reposcry/hooks/README.md", &hooks_readme(), options, summary)
 }
 
-fn write_file(
-    repo_root: &Path,
-    relative_path: impl AsRef<Path>,
-    content: &str,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
+fn write_file(repo_root: &Path, relative_path: impl AsRef<Path>, content: &str, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
     let relative_path = relative_path.as_ref();
     let path = repo_root.join(relative_path);
     let content = normalize_newline(content);
+
     if path.exists() {
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
         if existing == content {
@@ -604,6 +331,7 @@ fn write_file(
         summary.record(relative_path, InstallActionTaken::Updated);
         return Ok(());
     }
+
     if options.dry_run {
         summary.record(relative_path, InstallActionTaken::DryRunCreate);
         return Ok(());
@@ -633,103 +361,51 @@ fn make_executable_if_script(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn upsert_marked_block(
-    repo_root: &Path,
-    relative_path: impl AsRef<Path>,
-    marker: &str,
-    block: &str,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
+fn upsert_marked_block(repo_root: &Path, relative_path: impl AsRef<Path>, marker: &str, block: &str, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
     let relative_path = relative_path.as_ref();
     let path = repo_root.join(relative_path);
     let begin = format!("<!-- reposcry:{}:BEGIN -->", marker);
     let end = format!("<!-- reposcry:{}:END -->", marker);
     let managed_block = format!("{}\n{}\n{}\n", begin, block.trim(), end);
-    let existing = if path.exists() {
-        std::fs::read_to_string(&path).unwrap_or_default()
-    } else {
-        String::new()
-    };
+    let existing = if path.exists() { std::fs::read_to_string(&path).unwrap_or_default() } else { String::new() };
     let next = if let (Some(start), Some(end_pos)) = (existing.find(&begin), existing.find(&end)) {
         let after_end = end_pos + end.len();
-        format!(
-            "{}{}{}",
-            &existing[..start],
-            managed_block,
-            existing[after_end..].trim_start_matches('\n')
-        )
+        format!("{}{}{}", &existing[..start], managed_block, existing[after_end..].trim_start_matches('\n'))
     } else if existing.trim().is_empty() {
         managed_block
     } else {
         format!("{}\n\n{}", existing.trim_end(), managed_block)
     };
-    if path.exists() && existing == next {
-        summary.record(relative_path, InstallActionTaken::Unchanged);
-        return Ok(());
-    }
-    let action = if path.exists() {
-        if options.dry_run {
-            InstallActionTaken::DryRunUpdate
-        } else {
-            InstallActionTaken::Updated
-        }
-    } else if options.dry_run {
-        InstallActionTaken::DryRunCreate
-    } else {
-        InstallActionTaken::Created
-    };
-    if !options.dry_run {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, next)?;
-    }
-    summary.record(relative_path, action);
-    Ok(())
+    write_or_record(repo_root, relative_path, &existing, next, options, summary)
 }
 
-fn upsert_hash_marked_block(
-    repo_root: &Path,
-    relative_path: impl AsRef<Path>,
-    marker: &str,
-    block: &str,
-    options: InstallOptions,
-    summary: &mut InstallSummary,
-) -> Result<()> {
+fn upsert_hash_marked_block(repo_root: &Path, relative_path: impl AsRef<Path>, marker: &str, block: &str, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
     let relative_path = relative_path.as_ref();
     let path = repo_root.join(relative_path);
     let begin = format!("# reposcry:{}:BEGIN", marker);
     let end = format!("# reposcry:{}:END", marker);
     let managed_block = format!("{}\n{}\n{}\n", begin, block.trim(), end);
-    let existing = if path.exists() {
-        std::fs::read_to_string(&path).unwrap_or_default()
-    } else {
-        String::new()
-    };
+    let existing = if path.exists() { std::fs::read_to_string(&path).unwrap_or_default() } else { String::new() };
     let next = if let (Some(start), Some(end_pos)) = (existing.find(&begin), existing.find(&end)) {
         let after_end = end_pos + end.len();
-        format!(
-            "{}{}{}",
-            &existing[..start],
-            managed_block,
-            existing[after_end..].trim_start_matches('\n')
-        )
+        format!("{}{}{}", &existing[..start], managed_block, existing[after_end..].trim_start_matches('\n'))
     } else if existing.trim().is_empty() {
         managed_block
     } else {
         format!("{}\n\n{}", existing.trim_end(), managed_block)
     };
-    if path.exists() && existing == next {
+    write_or_record(repo_root, relative_path, &existing, next, options, summary)
+}
+
+fn write_or_record(repo_root: &Path, relative_path: &Path, existing: &str, next: String, options: InstallOptions, summary: &mut InstallSummary) -> Result<()> {
+    if existing == next {
         summary.record(relative_path, InstallActionTaken::Unchanged);
         return Ok(());
     }
-    let action = if path.exists() {
-        if options.dry_run {
-            InstallActionTaken::DryRunUpdate
-        } else {
-            InstallActionTaken::Updated
-        }
+    let path = repo_root.join(relative_path);
+    let exists = path.exists();
+    let action = if exists {
+        if options.dry_run { InstallActionTaken::DryRunUpdate } else { InstallActionTaken::Updated }
     } else if options.dry_run {
         InstallActionTaken::DryRunCreate
     } else {
@@ -740,6 +416,7 @@ fn upsert_hash_marked_block(
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&path, next)?;
+        make_executable_if_script(&path)?;
     }
     summary.record(relative_path, action);
     Ok(())
@@ -757,21 +434,22 @@ fn core_agent_instructions(platform: InstallPlatform) -> String {
     format!(
         r#"# RepoScry instructions for {}
 
-Use reposcry as the local repository map before editing code. \
-The goal is to avoid blind edits and avoid sending the full repository into the model context.
+Use RepoScry as the local repository map before editing code. The goal is to avoid blind edits and avoid sending the full repository into model context.
 
 ## Mandatory workflow before editing
 
-1. Make sure the repo is indexed:
+1. Build or refresh a fast graph index without semantic vectors:
 
 ```bash
-reposcry index
+reposcry --repo . index --no-semantic
 ```
+
+Do not run semantic/vector indexing in the normal edit loop. Semantic backends such as Candle/Qwen3 are intentionally opt-in because they can be slow on large repos.
 
 2. Build a focused context pack for the current task:
 
 ```bash
-reposcry context "$TASK" --strict --budget 20000 --format markdown > .reposcry/AI_CONTEXT.md
+reposcry --repo . context "$TASK" --strict --budget 20000 --format markdown > .reposcry/AI_CONTEXT.md
 ```
 
 3. Read `.reposcry/AI_CONTEXT.md` before changing files.
@@ -779,25 +457,34 @@ reposcry context "$TASK" --strict --budget 20000 --format markdown > .reposcry/A
 4. For any file you plan to edit, inspect graph impact first:
 
 ```bash
-reposcry explain path/to/file
-reposcry deps path/to/file
-reposcry rdeps path/to/file
+reposcry --repo . explain path/to/file
+reposcry --repo . deps path/to/file
+reposcry --repo . rdeps path/to/file
 ```
 
-5. After editing, validate the change:
+5. After a batch of edits, update only changed files in the local graph/cache:
 
 ```bash
-reposcry validate main...HEAD
+reposcry-update --repo . --changed --base main
 ```
 
-If the repository does not use `main`, replace `main...HEAD` with the correct base branch.
+If the repository does not use `main`, replace `main` with the correct base branch.
+
+6. Review and validate the change:
+
+```bash
+reposcry --repo . detect_changes main HEAD --format json
+reposcry --repo . validate main HEAD
+```
 
 ## Rules for the coding agent
 
-- Do not load the entire repository when reposcry can produce a smaller context pack.
+- Do not load the entire repository when RepoScry can produce a smaller context pack.
 - Do not edit a file only because its name looks relevant. Check dependencies and reverse dependencies first.
-- If reposcry reports LOW confidence, do not pretend the context is complete. Search for a better entrypoint or ask for one.
-- Prefer `reposcry context`, `reposcry explain`, `reposcry deps`, and `reposcry rdeps` over broad file reads.
+- If RepoScry reports LOW confidence, do not pretend the context is complete. Search for a better entrypoint or ask for one.
+- Prefer `reposcry context`, `reposcry explain`, `reposcry deps`, `reposcry rdeps`, and `reposcry query_graph` over broad file reads.
+- After editing, prefer `reposcry-update --changed` over full `reposcry index`.
+- Do not run semantic/vector refresh during normal editing.
 - Treat high fan-in files, API boundaries, database layers, event streams, and shared utilities as high-risk.
 - Do not edit generated or vendor folders: `target/`, `.next/`, `node_modules/`, `dist/`, `build/`, `public/static/charting_library/`.
 - Keep changes minimal and verify with tests or `reposcry validate`.
@@ -805,12 +492,24 @@ If the repository does not use `main`, replace `main...HEAD` with the correct ba
 ## Quick commands
 
 ```bash
-reposcry stats
-reposcry context "$TASK" --strict --budget 20000
-reposcry report main...HEAD
-reposcry rules check
-reposcry validate main...HEAD
-```"#,
+reposcry --repo . stats
+reposcry --repo . context "$TASK" --strict --budget 20000
+reposcry-update --repo . --changed --base main
+reposcry --repo . detect_changes main HEAD --format json
+reposcry --repo . report main HEAD
+reposcry --repo . rules check
+reposcry --repo . validate main HEAD
+```
+
+## Slow commands
+
+Avoid these in the normal edit loop unless explicitly requested:
+
+```bash
+reposcry --repo . index
+reposcry --repo . refresh-search --semantic-backend candle
+```
+"#,
         platform.label()
     )
 }
@@ -818,49 +517,51 @@ reposcry validate main...HEAD
 fn skill_file() -> String {
     r#"# Skill: RepoScry assisted coding
 
-Use this skill when you are asked to change, review, refactor, debug, or explain a repository.
-
-## Purpose
-
-reposcry is a local code graph and AI context compiler. It gives the agent a compact map of relevant files, dependencies, reverse dependencies, symbols, tests, risk warnings, and architecture rules.
+Use this skill when asked to change, review, refactor, debug, or explain a repository.
 
 ## Required behavior
 
 Before editing code:
 
 ```bash
-reposcry index
-reposcry context "$TASK" --strict --budget 20000 --format markdown > .reposcry/AI_CONTEXT.md
+reposcry --repo . index --no-semantic
+reposcry --repo . context "$TASK" --strict --budget 20000 --format markdown > .reposcry/AI_CONTEXT.md
 ```
 
 Read `.reposcry/AI_CONTEXT.md`. Then inspect planned edit files:
 
 ```bash
-reposcry explain <file>
-reposcry deps <file>
-reposcry rdeps <file>
+reposcry --repo . explain <file>
+reposcry --repo . deps <file>
+reposcry --repo . rdeps <file>
 ```
 
-After editing:
+After a batch of edits:
 
 ```bash
-reposcry validate main...HEAD
+reposcry-update --repo . --changed --base main
+reposcry --repo . detect_changes main HEAD --format json
+reposcry --repo . validate main HEAD
 ```
 
 ## Anti-token-bloat rule
 
-Never paste the full repository or full graph into context. Ask reposcry for the smallest useful context pack."#
-    .to_string()
+Never paste the full repository or full graph into context. Ask RepoScry for the smallest useful context pack.
+
+## Performance rule
+
+Do not run semantic/vector refresh in the normal edit loop. Use `--no-semantic` for indexing and `reposcry-update --changed` after edits."#
+        .to_string()
 }
 
 fn pre_edit_hook() -> String {
-    r#"# reposcry pre-edit hook
+    r#"# RepoScry pre-edit hook
 
-Before making code changes, the agent should run:
+Before making code changes, run:
 
 ```bash
-reposcry index
-reposcry context "$TASK" --strict --budget 20000 --format markdown > .reposcry/AI_CONTEXT.md
+reposcry --repo . index --no-semantic
+reposcry --repo . context "$TASK" --strict --budget 20000 --format markdown > .reposcry/AI_CONTEXT.md
 ```
 
 Then read `.reposcry/AI_CONTEXT.md` and inspect dependencies for each planned edit file."#
@@ -868,17 +569,21 @@ Then read `.reposcry/AI_CONTEXT.md` and inspect dependencies for each planned ed
 }
 
 fn post_edit_hook() -> String {
-    r#"# reposcry post-edit hook
+    r#"# RepoScry post-edit hook
 
-After making code changes, the agent should run:
+After a batch of code edits, update the graph incrementally and validate:
 
 ```bash
-reposcry validate main...HEAD
-reposcry report main...HEAD --format markdown > .reposcry/PR_REVIEW.md
+reposcry-update --repo . --changed --base main
+reposcry --repo . detect_changes main HEAD --format json
+reposcry --repo . validate main HEAD
+reposcry --repo . report main HEAD --format markdown > .reposcry/PR_REVIEW.md
 ```
 
-If validation reports cycles, architecture violations, high-risk files without tests, or low-confidence context, fix or report it before claiming completion."#
-    .to_string()
+If the repository does not use `main`, replace it with the correct base branch.
+
+Do not run semantic/vector refresh in this loop unless explicitly requested."#
+        .to_string()
 }
 
 fn shell_context_script() -> String {
@@ -886,17 +591,26 @@ fn shell_context_script() -> String {
 set -euo pipefail
 TASK="${*:-Review the current change safely}"
 mkdir -p .reposcry
-reposcry index
-reposcry context "$TASK" --strict --budget "${reposcry_TOKEN_BUDGET:-20000}" --format markdown > .reposcry/AI_CONTEXT.md
+reposcry --repo . index --no-semantic
+reposcry --repo . context "$TASK" --strict --budget "${REPOSCRY_TOKEN_BUDGET:-20000}" --format markdown > .reposcry/AI_CONTEXT.md
 printf 'Wrote .reposcry/AI_CONTEXT.md\n'"#
-    .to_string()
+        .to_string()
+}
+
+fn shell_update_script() -> String {
+    r#"#!/usr/bin/env bash
+set -euo pipefail
+BASE="${1:-main}"
+reposcry-update --repo . --changed --base "$BASE""#
+        .to_string()
 }
 
 fn shell_validate_script() -> String {
     r#"#!/usr/bin/env bash
 set -euo pipefail
-BASE="${1:-main...HEAD}"
-reposcry validate "$BASE""#
+BASE="${1:-main}"
+reposcry --repo . detect_changes "$BASE" HEAD --format json
+reposcry --repo . validate "$BASE" HEAD"#
         .to_string()
 }
 
@@ -907,20 +621,30 @@ fn powershell_context_script() -> String {
 )
 $ErrorActionPreference = "Stop"
 $Task = if ($TaskParts.Count -gt 0) { $TaskParts -join " " } else { "Review the current change safely" }
-$Budget = if ($env:reposcry_TOKEN_BUDGET) { $env:reposcry_TOKEN_BUDGET } else { "20000" }
+$Budget = if ($env:REPOSCRY_TOKEN_BUDGET) { $env:REPOSCRY_TOKEN_BUDGET } else { "20000" }
 New-Item -ItemType Directory -Force -Path ".reposcry" | Out-Null
-reposcry index
-reposcry context $Task --strict --budget $Budget --format markdown | Out-File -Encoding UTF8 ".reposcry/AI_CONTEXT.md"
+reposcry --repo . index --no-semantic
+reposcry --repo . context $Task --strict --budget $Budget --format markdown | Out-File -Encoding UTF8 ".reposcry/AI_CONTEXT.md"
 Write-Host "Wrote .reposcry/AI_CONTEXT.md""#
-    .to_string()
+        .to_string()
+}
+
+fn powershell_update_script() -> String {
+    r#"param(
+  [string]$Base = "main"
+)
+$ErrorActionPreference = "Stop"
+reposcry-update --repo . --changed --base $Base"#
+        .to_string()
 }
 
 fn powershell_validate_script() -> String {
     r#"param(
-  [string]$Base = "main...HEAD"
+  [string]$Base = "main"
 )
 $ErrorActionPreference = "Stop"
-reposcry validate $Base"#
+reposcry --repo . detect_changes $Base HEAD --format json
+reposcry --repo . validate $Base HEAD"#
         .to_string()
 }
 
@@ -937,8 +661,7 @@ reposcry.db
 
 fn claude_command(kind: &str, windows: bool) -> String {
     let body = match (kind, windows) {
-        ("context", true) => {
-            r#"Generate a reposcry context pack for the task in $ARGUMENTS.
+        ("context", true) => r#"Generate a RepoScry context pack for the task in $ARGUMENTS.
 
 Run:
 
@@ -946,10 +669,8 @@ Run:
 ./scripts/reposcry-context.ps1 $ARGUMENTS
 ```
 
-Then read `.reposcry/AI_CONTEXT.md` before editing."#
-        }
-        ("context", false) => {
-            r#"Generate a reposcry context pack for the task in $ARGUMENTS.
+Then read `.reposcry/AI_CONTEXT.md` before editing."#,
+        ("context", false) => r#"Generate a RepoScry context pack for the task in $ARGUMENTS.
 
 Run:
 
@@ -957,52 +678,63 @@ Run:
 ./scripts/reposcry-context.sh $ARGUMENTS
 ```
 
-Then read `.reposcry/AI_CONTEXT.md` before editing."#
-        }
-        ("review", true) => {
-            r#"Review the current branch using reposcry.
+Then read `.reposcry/AI_CONTEXT.md` before editing."#,
+        ("update", true) => r#"Update the RepoScry graph after an edit batch.
 
 Run:
 
 ```powershell
-reposcry report main...HEAD --format markdown | Out-File -Encoding UTF8 .reposcry/PR_REVIEW.md
+./scripts/reposcry-update.ps1 main
 ```
 
-Read `.reposcry/PR_REVIEW.md` and summarize high-risk changes, impacted files, and tests."#
-        }
-        ("review", false) => {
-            r#"Review the current branch using reposcry.
+Replace `main` with the correct base branch when needed."#,
+        ("update", false) => r#"Update the RepoScry graph after an edit batch.
 
 Run:
 
 ```bash
-reposcry report main...HEAD --format markdown > .reposcry/PR_REVIEW.md
+./scripts/reposcry-update.sh main
 ```
 
-Read `.reposcry/PR_REVIEW.md` and summarize high-risk changes, impacted files, and tests."#
-        }
-        ("validate", true) => {
-            r#"Validate the current branch using reposcry.
+Replace `main` with the correct base branch when needed."#,
+        ("review", true) => r#"Review the current branch using RepoScry.
 
 Run:
 
 ```powershell
-./scripts/reposcry-validate.ps1 main...HEAD
+reposcry --repo . detect_changes main HEAD --format json
+reposcry --repo . report main HEAD --format markdown | Out-File -Encoding UTF8 .reposcry/PR_REVIEW.md
 ```
 
-Fix or report any dependency cycles, architecture violations, or missing tests."#
-        }
-        _ => {
-            r#"Validate the current branch using reposcry.
+Read `.reposcry/PR_REVIEW.md` and summarize high-risk changes, impacted files, and tests."#,
+        ("review", false) => r#"Review the current branch using RepoScry.
 
 Run:
 
 ```bash
-./scripts/reposcry-validate.sh main...HEAD
+reposcry --repo . detect_changes main HEAD --format json
+reposcry --repo . report main HEAD --format markdown > .reposcry/PR_REVIEW.md
 ```
 
-Fix or report any dependency cycles, architecture violations, or missing tests."#
-        }
+Read `.reposcry/PR_REVIEW.md` and summarize high-risk changes, impacted files, and tests."#,
+        ("validate", true) => r#"Validate the current branch using RepoScry.
+
+Run:
+
+```powershell
+./scripts/reposcry-validate.ps1 main
+```
+
+Fix or report dependency cycles, architecture violations, high-risk files, or missing tests."#,
+        _ => r#"Validate the current branch using RepoScry.
+
+Run:
+
+```bash
+./scripts/reposcry-validate.sh main
+```
+
+Fix or report dependency cycles, architecture violations, high-risk files, or missing tests."#,
     };
     body.to_string()
 }
@@ -1016,9 +748,7 @@ fn vscode_settings() -> String {
 }
 
 fn aider_config() -> String {
-    r#"# reposcry generated Aider config.
-
-# If you already have an Aider config, merge this manually instead of forcing overwrite.
+    r#"# RepoScry generated Aider config.
 read:
   - .aider.reposcry.md
   - .reposcry/skills/code-review-graph/SKILL.md"#
@@ -1041,16 +771,19 @@ alwaysApply: true
 fn git_pre_commit_hook() -> String {
     r#"#!/usr/bin/env bash
 set -euo pipefail
+if command -v reposcry-update >/dev/null 2>&1; then
+  reposcry-update --repo . --changed --base main --skip-warm-calls || true
+fi
 if command -v reposcry >/dev/null 2>&1; then
-  reposcry validate main...HEAD
+  reposcry --repo . validate main HEAD
 else
   echo "reposcry not found; skipping RepoScry validation" >&2
 fi"#
-    .to_string()
+        .to_string()
 }
 
 fn hooks_readme() -> String {
-    r#"# reposcry hooks
+    r#"# RepoScry hooks
 
 This directory contains agent hook instructions and optional git hook scripts.
 
@@ -1061,6 +794,14 @@ git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit
 ```
 
-On Windows PowerShell, run reposcry manually before commit if your Git setup does not execute shell hooks."#
+Normal AI workflow:
+
+```bash
+reposcry --repo . index --no-semantic
+reposcry-update --repo . --changed --base main
+reposcry --repo . validate main HEAD
+```
+
+On Windows PowerShell, run the scripts in `scripts/` manually if your Git setup does not execute shell hooks."#
         .to_string()
 }
