@@ -57,7 +57,7 @@ jobs:
           export REPOSCRY_INSTALL_DIR="$PWD/install-check"
           export REPOSCRY_OS="$(uname -s)"
           export REPOSCRY_ARCH="$(uname -m)"
-          ./install.sh
+          bash ./install.sh
           "$PWD/install-check/reposcry" --version
       - name: Package release (windows)
         if: runner.os == 'Windows'

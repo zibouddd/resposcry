@@ -221,7 +221,7 @@ reposcry semantic_search_nodes "cache database calls" --semantic
 Run local benchmarks with:
 
 ```bash
-./scripts/bench.sh
+bash scripts/bench.sh
 ```
 
 or on Windows:
@@ -249,7 +249,7 @@ Run the local release/install smoke path with:
 or on Unix-like systems:
 
 ```bash
-./scripts/smoke-release.sh
+bash scripts/smoke-release.sh
 ```
 
 ## Documentation

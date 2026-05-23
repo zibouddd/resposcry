@@ -18,5 +18,5 @@ PY
     export REPOSCRY_BENCH_FIXTURE="$fixture"
   fi
   unset BENCH_OUT_NAME
-  "$ROOT_DIR/scripts/bench.sh"
+  bash "$ROOT_DIR/scripts/bench.sh"
 done

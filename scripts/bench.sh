@@ -35,7 +35,7 @@ SEMANTIC_QUERY="$(resolve_fixture_field semantic_query)"
 FIXTURE_PATH="$(cd "$ROOT_DIR/$FIXTURE_PATH_REL" && pwd)"
 
 if [[ "$FIXTURE_NAME" != "current_repo" ]]; then
-  "$ROOT_DIR/scripts/setup-benchmark-fixtures.sh" "$FIXTURE_NAME"
+  bash "$ROOT_DIR/scripts/setup-benchmark-fixtures.sh" "$FIXTURE_NAME"
 fi
 
 OUT_DIR="${BENCH_OUT_DIR:-benchmarks/out}"

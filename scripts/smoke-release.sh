@@ -45,7 +45,7 @@ sha256sum "$ASSET_PATH" > "$ASSET_PATH.sha256"
 
 export REPOSCRY_RELEASE_BASE_URL="file://$TMP_ROOT"
 export REPOSCRY_INSTALL_DIR="$INSTALL_DIR"
-./install.sh >/dev/null
+bash ./install.sh >/dev/null
 
 if [[ ! -x "$INSTALL_DIR/reposcry" ]]; then
   echo "Installed reposcry was not found" >&2

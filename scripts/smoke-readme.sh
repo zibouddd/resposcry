@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-"$ROOT_DIR/scripts/setup-benchmark-fixtures.sh" "small_rust_repo"
+bash "$ROOT_DIR/scripts/setup-benchmark-fixtures.sh" "small_rust_repo"
 
 TMP_ROOT="$(mktemp -d)"
 INSTALL_ROOT="$TMP_ROOT/install-root"
