@@ -8,6 +8,10 @@ autobins = false
 name = "reposcry"
 path = "src/main.rs"
 
+[[bin]]
+name = "reposcry-update"
+path = "src/bin/reposcry-update.rs"
+
 [dependencies]
 reposcry-graph = { path = "../reposcry-graph" }
 reposcry-indexer = { path = "../reposcry-indexer" }
