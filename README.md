@@ -1,69 +1,160 @@
-# Code Review Graph (CRG)
+# RepoScry
 
-Rust CLI that indexes a repository, builds a local dependency graph, and generates compact AI context packs so coding agents do not edit blindly.
+[![CI](https://github.com/zibouddd/resposcry/actions/workflows/ci.yml/badge.svg)](https://github.com/zibouddd/resposcry/actions/workflows/ci.yml)
+[![Release](https://github.com/zibouddd/resposcry/actions/workflows/release.yml/badge.svg)](https://github.com/zibouddd/resposcry/actions/workflows/release.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## Basic usage
+RepoScry is a local code review graph engine for repository indexing, impact analysis, AI context generation, CRG-compatible queries, and MCP tool serving.
+
+## Package naming
+
+- Canonical CLI: `reposcry`
+- Compatibility CLI: `reposcry-crg`
+- Full-index helper: `reposcry-index-full`
+
+`reposcry` is the primary user-facing command. The compatibility binaries exist to preserve the CRG and MCP surface while the project converges on one CLI.
+
+## Install
+
+From source:
 
 ```bash
 cargo install --path crates/reposcry-cli --force
-reposcry-cli -- init
-reposcry-cli -- index
-reposcry-cli -- stats
-reposcry-cli -- deps crates/reposcry-cli/src/main.rs
-reposcry-cli -- rdeps crates/reposcry-cache/src/db.rs
-reposcry-cli -- context "fix dependency graph rebuild" --budget
-
-OR
-cargo run -p reposcry-cli -- init
-cargo run -p reposcry-cli -- index
-cargo run -p reposcry-cli -- stats
-cargo run -p reposcry-cli -- deps crates/reposcry-cli/src/main.rs
-cargo run -p reposcry-cli -- rdeps crates/reposcry-cache/src/db.rs
-cargo run -p reposcry-cli -- context "fix dependency graph rebuild" --budget 20000 --strict
 ```
 
-## What is indexed
+From release artifact:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zibouddd/resposcry/main/install.sh | bash
+```
+
+Update an existing source install:
+
+```bash
+cargo install --path crates/reposcry-cli --force
+```
+
+## Quick start
+
+Initialize and index the current repository:
+
+```bash
+reposcry init
+reposcry index
+reposcry stats
+```
+
+Build a focused context pack for an editing task:
+
+```bash
+reposcry context "fix dependency graph rebuild" --strict --budget 20000 --format markdown > .reposcry/AI_CONTEXT.md
+```
+
+Inspect graph impact before editing:
+
+```bash
+reposcry explain crates/reposcry-cli/src/main.rs
+reposcry deps crates/reposcry-cli/src/main.rs
+reposcry rdeps crates/reposcry-cache/src/db.rs
+```
+
+Validate after editing:
+
+```bash
+reposcry validate main
+```
+
+## Full index workflow
+
+Use the full-index helper when you want one command for an install-time index pass:
+
+```bash
+reposcry-index-full --repo .
+```
+
+## CRG-compatible commands
+
+RepoScry ships a CRG-compatible command surface from `reposcry-crg`:
+
+```bash
+reposcry-crg --repo . get_architecture_overview --format json
+reposcry-crg --repo . query_graph "callers_of rebuild_graph"
+reposcry-crg --repo . query_graph "tests_for parse_rust"
+reposcry-crg --repo . get_impact_radius rebuild_graph --depth 4
+reposcry-crg --repo . get_affected_flows main HEAD
+reposcry-crg --repo . semantic_search_nodes "cache database calls" --limit 20
+reposcry-crg --repo . refactor_tool rename parse_rust parse_rust_v2
+```
+
+## MCP setup
+
+Run the MCP-compatible stdio server:
+
+```bash
+reposcry-crg mcp --repo /path/to/repo
+```
+
+Example client configuration:
+
+```json
+{
+  "mcpServers": {
+    "reposcry": {
+      "command": "reposcry-crg",
+      "args": ["mcp", "--repo", "/path/to/repo"]
+    }
+  }
+}
+```
+
+Supported MCP methods:
+
+- `initialize`
+- `tools/list`
+- `tools/call`
+
+## What gets indexed
 
 - files
 - symbols
 - imports
-- resolved file-level import edges
-- git diff impact, when inside a Git repo
+- file-level import edges
+- call sites
+- symbol-level call edges
+- local full-text search documents
 
-The full graph stays local in `.code-review-graph/reposcry.db`. AI receives only the selected context pack.
+The SQLite cache lives in:
 
-## Important fix in this version
-
-Imports are now persisted in SQLite and rebuilt into `Imports` edges. This makes `deps`, `rdeps`, `diff`, `rules check`, and `context` useful for impact analysis.
-
-## AI agent / IDE installers
-
-CRG can install repository instructions, skills, and hooks for common coding agents:
-
-```bash
-reposcry install                         # Claude Code Linux/Mac
-reposcry install --platform windows      # Claude Code Windows
-reposcry install --platform codex
-reposcry install --platform opencode
-reposcry install --platform copilot
-reposcry vscode install
-reposcry install --platform aider
-reposcry install --platform claw
-reposcry install --platform droid
-reposcry install --platform trae
-reposcry install --platform trae-cn
-reposcry install --platform gemini
-reposcry install --platform hermes
-reposcry install --platform kimi
-reposcry kiro install
-reposcry install --platform pi
-reposcry cursor install
-reposcry antigravity install
-reposcry hooks install
+```text
+.reposcry/reposcry.db
 ```
 
-Use `--dry-run` to preview and `--force` to overwrite existing non-managed files.
+## Benchmarks
 
-The installer creates `.reposcry/skills/code-review-graph/SKILL.md`, platform instruction files, and helper scripts so agents run `reposcry context` before editing and `reposcry validate` after editing.
+Run local benchmarks with:
 
-Only the `reposcry` binary is built. No `graphify` alias is generated.
+```bash
+./scripts/bench.sh
+```
+
+or on Windows:
+
+```powershell
+./scripts/bench.ps1
+```
+
+Published benchmark notes live in [BENCHMARKS.md](BENCHMARKS.md).
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md)
+- [docs/mcp.md](docs/mcp.md)
+- [docs/benchmarks.md](docs/benchmarks.md)
+- [docs/code-review-graph-compat.md](docs/code-review-graph-compat.md)
+
+## Limitations
+
+- Dynamic imports, reflection, and framework runtime behavior are under-approximated.
+- Call resolution still uses heuristics when multiple symbol matches are plausible.
+- Diff-based commands such as `detect_changes main HEAD` inspect git refs, not unstaged working tree edits.
+- The compatibility surface currently spans multiple binaries while the CLI naming converges.

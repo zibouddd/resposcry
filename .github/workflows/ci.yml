@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace --all-targets
+      - name: Index
+        run: cargo run -p reposcry-cli --bin reposcry -- index
+      - name: Validate
+        run: cargo run -p reposcry-cli --bin reposcry -- validate main

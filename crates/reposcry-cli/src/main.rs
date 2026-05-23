@@ -9,7 +9,7 @@ use installer::{install_platform, InstallOptions, InstallPlatform};
 use tracing::{debug, info, warn};
 use tracing_subscriber::EnvFilter;
 
-use reposcry_cache::db::CacheDb;
+use reposcry_cache::db::{CacheDb, CachedCallSite, CachedSymbolEdge};
 use reposcry_context::{ContextBuilder, ContextConfig, OutputFormat};
 use reposcry_git::GitIntegration;
 use reposcry_graph::edge::EdgeKind;
@@ -446,7 +446,10 @@ fn cmd_index(
         let hash = blake3::hash(source.as_bytes()).to_hex().to_string();
         let cached = db.get_file_by_path(&file.relative_path)?;
         let needs_parse = match cached.as_ref() {
-            Some(existing) => existing.hash != hash,
+            Some(existing) => {
+                existing.hash != hash
+                    || db.get_call_sites_by_file(existing.id)?.is_empty()
+            }
             None => true,
         };
         if needs_parse {
@@ -461,12 +464,14 @@ fn cmd_index(
                     )?;
                     db.insert_symbols(db_file_id, &parsed.symbols)?;
                     db.insert_imports(db_file_id, &parsed.imports)?;
+                    db.insert_call_sites(db_file_id, &parsed.calls)?;
                     parsed_count += 1;
                     debug!(
-                        "Indexed: {} ({} symbols, {} imports)",
+                        "Indexed: {} ({} symbols, {} imports, {} calls)",
                         file.relative_path,
                         parsed.symbols.len(),
-                        parsed.imports.len()
+                        parsed.imports.len(),
+                        parsed.calls.len()
                     );
                 }
                 Err(e) => {
@@ -483,6 +488,7 @@ fn cmd_index(
                     )?;
                     db.insert_symbols(db_file_id, &[])?;
                     db.insert_imports(db_file_id, &[])?;
+                    db.insert_call_sites(db_file_id, &[])?;
                 }
             }
         } else {
@@ -491,6 +497,8 @@ fn cmd_index(
         }
     }
     rebuild_persisted_import_edges(&db)?;
+    rebuild_persisted_call_edges(&db)?;
+    rebuild_search_index(&db, repo_root)?;
     let preset_name = preset_name.unwrap_or("none");
     db.set_config(
         "last_indexed_at",
@@ -499,13 +507,59 @@ fn cmd_index(
     db.set_config("preset", preset_name)?;
     db.set_config("files_count", &files.len().to_string())?;
     info!(
-        "Indexing complete. {} files indexed, {} parsed, {} unchanged, {} imports, {} edges.",
+        "Indexing complete. {} files indexed, {} parsed, {} unchanged, {} imports, {} calls, {} symbol call edges, {} file edges.",
         db.file_count()?,
         parsed_count,
         skipped_count,
         db.import_count()?,
+        db.call_site_count()?,
+        db.symbol_edge_count()?,
         db.edge_count()?
     );
+    Ok(())
+}
+
+fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
+    let files = db.get_all_files()?;
+    db.clear_search_index()?;
+    for file in &files {
+        let imports = db.get_imports_by_file(file.id)?;
+        let imports_text = imports
+            .iter()
+            .flat_map(|import| {
+                let mut parts = vec![import.target.clone()];
+                parts.extend(import.imported_names.clone());
+                parts
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let source = std::fs::read_to_string(repo_root.join(&file.path)).unwrap_or_default();
+        db.insert_search_document(
+            1_000_000_000_i64 + file.id,
+            &file.path,
+            "file",
+            &file.path,
+            None,
+            None,
+            &imports_text,
+            &source,
+        )?;
+        for symbol in db.get_symbols_by_file(file.id)? {
+            let Some(symbol_id) = symbol.id else {
+                continue;
+            };
+            db.insert_search_document(
+                symbol_id,
+                &file.path,
+                &symbol.kind,
+                &symbol.name,
+                symbol.signature.as_deref(),
+                symbol.doc_comment.as_deref(),
+                &imports_text,
+                "",
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -533,6 +587,124 @@ fn rebuild_persisted_import_edges(db: &CacheDb) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn rebuild_persisted_call_edges(db: &CacheDb) -> anyhow::Result<()> {
+    let files = db.get_all_files()?;
+    let mut symbols_by_file = HashMap::new();
+    let mut global_symbol_candidates: HashMap<String, Vec<reposcry_graph::symbol::Symbol>> =
+        HashMap::new();
+    for file in &files {
+        let symbols = db.get_symbols_by_file(file.id)?;
+        for symbol in &symbols {
+            global_symbol_candidates
+                .entry(symbol.name.clone())
+                .or_default()
+                .push(symbol.clone());
+            if let Some(short) = symbol.name.rsplit("::").next() {
+                global_symbol_candidates
+                    .entry(short.to_string())
+                    .or_default()
+                    .push(symbol.clone());
+            }
+        }
+        symbols_by_file.insert(file.id, symbols);
+    }
+
+    db.clear_edges_by_kind(EdgeKind::Calls)?;
+    db.clear_symbol_edges_by_kind(EdgeKind::Calls.as_str())?;
+    let mut symbol_edges = Vec::<CachedSymbolEdge>::new();
+    let mut file_edges = HashSet::<(i64, i64)>::new();
+
+    for file in &files {
+        let call_sites = db.get_call_sites_by_file(file.id)?;
+        let Some(file_symbols) = symbols_by_file.get(&file.id) else {
+            continue;
+        };
+        for call_site in &call_sites {
+            let Some(source_symbol) = resolve_caller_symbol(file_symbols, call_site) else {
+                continue;
+            };
+            let Some((target_symbol, strategy)) =
+                resolve_callee_symbol(file_symbols, &global_symbol_candidates, call_site)
+            else {
+                continue;
+            };
+            let Some(source_symbol_id) = source_symbol.id else {
+                continue;
+            };
+            let Some(target_symbol_id) = target_symbol.id else {
+                continue;
+            };
+            symbol_edges.push(CachedSymbolEdge {
+                id: 0,
+                source_symbol_id,
+                target_symbol_id,
+                source_file_id: file.id,
+                target_file_id: target_symbol
+                    .id
+                    .and_then(|_| files.iter().find(|f| f.path == target_symbol.file_path).map(|f| f.id))
+                    .unwrap_or(file.id),
+                kind: EdgeKind::Calls.as_str().to_string(),
+                line: call_site.line,
+                confidence: call_site.confidence,
+                resolution_strategy: Some(strategy),
+            });
+            if let Some(target_file) = files.iter().find(|candidate| candidate.path == target_symbol.file_path) {
+                file_edges.insert((file.id, target_file.id));
+            }
+        }
+    }
+
+    db.insert_symbol_edges(&symbol_edges)?;
+    for (source_file_id, target_file_id) in file_edges {
+        let target_path = files
+            .iter()
+            .find(|file| file.id == target_file_id)
+            .map(|file| file.path.as_str());
+        db.insert_edge(
+            source_file_id,
+            Some(target_file_id),
+            target_path,
+            EdgeKind::Calls,
+            1.0,
+        )?;
+    }
+    Ok(())
+}
+
+fn resolve_caller_symbol<'a>(
+    file_symbols: &'a [reposcry_graph::symbol::Symbol],
+    call_site: &CachedCallSite,
+) -> Option<&'a reposcry_graph::symbol::Symbol> {
+    file_symbols
+        .iter()
+        .filter(|symbol| symbol.name == call_site.caller)
+        .find(|symbol| symbol.start_line <= call_site.line && symbol.end_line >= call_site.line)
+        .or_else(|| {
+            file_symbols
+                .iter()
+                .filter(|symbol| symbol.start_line <= call_site.line && symbol.end_line >= call_site.line)
+                .min_by_key(|symbol| symbol.end_line.saturating_sub(symbol.start_line))
+        })
+}
+
+fn resolve_callee_symbol(
+    file_symbols: &[reposcry_graph::symbol::Symbol],
+    global_symbol_candidates: &HashMap<String, Vec<reposcry_graph::symbol::Symbol>>,
+    call_site: &CachedCallSite,
+) -> Option<(reposcry_graph::symbol::Symbol, String)> {
+    if let Some(symbol) = file_symbols
+        .iter()
+        .find(|symbol| symbol.name == call_site.callee || symbol.name.rsplit("::").next() == Some(call_site.callee.as_str()))
+    {
+        return Some((symbol.clone(), "same_file".to_string()));
+    }
+    let candidates = global_symbol_candidates.get(&call_site.callee)?;
+    if candidates.len() == 1 {
+        return Some((candidates[0].clone(), "unique_global".to_string()));
+    }
+    None
 }
 
 fn resolve_import_target(

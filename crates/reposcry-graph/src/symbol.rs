@@ -28,6 +28,8 @@ pub struct CallSite {
     pub callee: String,
     pub file: String,
     pub line: u32,
+    pub confidence: f64,
+    pub resolution_strategy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

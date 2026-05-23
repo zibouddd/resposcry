@@ -2,7 +2,7 @@ use anyhow::Result;
 use tracing::warn;
 
 use reposcry_graph::language::Language;
-use reposcry_graph::symbol::{Import, ParsedFile, Symbol, TestCase};
+use reposcry_graph::symbol::{CallSite, Import, ParsedFile, Symbol, TestCase};
 
 pub fn parse_file(path: &str, source: &str) -> Result<ParsedFile> {
     let language = Language::from_extension(path);
@@ -139,6 +139,147 @@ fn extract_scoped_use(node: &tree_sitter::Node, source: &[u8]) -> String {
     }
 }
 
+fn collect_rust_items(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    path: &str,
+    symbols: &mut Vec<Symbol>,
+    imports: &mut Vec<Import>,
+    tests: &mut Vec<TestCase>,
+) {
+    let kind = node.kind();
+    let start = usize_to_u32(node.start_position().row + 1);
+    let end = usize_to_u32(node.end_position().row + 1);
+    match kind {
+        "mod_item" => {
+            let name = node_name(node, source).unwrap_or_else(|| "unknown".to_string());
+            symbols.push(Symbol {
+                id: None,
+                file_path: path.to_string(),
+                name,
+                kind: "module".into(),
+                start_line: start,
+                end_line: end,
+                signature: None,
+                visibility: visibility_from_node(node, source),
+                doc_comment: None,
+            });
+            if let Some(body) = find_child(node, "declaration_list") {
+                let mut cursor = body.walk();
+                for child in body.children(&mut cursor) {
+                    collect_rust_items(&child, source, path, symbols, imports, tests);
+                }
+            }
+        }
+        "attribute_item" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_rust_items(&child, source, path, symbols, imports, tests);
+            }
+        }
+        "struct_item" => {
+            let name = node_name(node, source).unwrap_or_else(|| "unknown".to_string());
+            let vis = visibility_from_node(node, source);
+            let sig = format!(
+                "{}struct {}",
+                vis.as_deref()
+                    .map(|value| format!("{} ", value))
+                    .unwrap_or_default(),
+                name
+            );
+            symbols.push(Symbol {
+                id: None,
+                file_path: path.to_string(),
+                name,
+                kind: "struct".into(),
+                start_line: start,
+                end_line: end,
+                signature: Some(sig),
+                visibility: vis,
+                doc_comment: None,
+            });
+        }
+        "enum_item" => {
+            let name = node_name(node, source).unwrap_or_else(|| "unknown".to_string());
+            symbols.push(Symbol {
+                id: None,
+                file_path: path.to_string(),
+                name,
+                kind: "enum".into(),
+                start_line: start,
+                end_line: end,
+                signature: None,
+                visibility: visibility_from_node(node, source),
+                doc_comment: None,
+            });
+        }
+        "trait_item" => {
+            let name = node_name(node, source).unwrap_or_else(|| "unknown".to_string());
+            symbols.push(Symbol {
+                id: None,
+                file_path: path.to_string(),
+                name,
+                kind: "trait".into(),
+                start_line: start,
+                end_line: end,
+                signature: None,
+                visibility: visibility_from_node(node, source),
+                doc_comment: None,
+            });
+        }
+        "function_item" | "function_signature_item" => {
+            let name = node_name(node, source).unwrap_or_else(|| "unknown".to_string());
+            if name == "main" {
+                return;
+            }
+            let vis = visibility_from_node(node, source);
+            let attr_start = node.start_byte().saturating_sub(256);
+            let attrs = std::str::from_utf8(
+                &source[usize::min(attr_start, source.len())..usize::min(node.start_byte(), source.len())],
+            )
+            .unwrap_or("");
+            let is_test = attrs.contains("#[test]")
+                || attrs.contains("#[tokio::test]")
+                || attrs.contains("#[async_std::test]");
+            let sig = extract_function_signature(node, source);
+            symbols.push(Symbol {
+                id: None,
+                file_path: path.to_string(),
+                name: name.clone(),
+                kind: if is_test { "test" } else { "function" }.into(),
+                start_line: start,
+                end_line: end,
+                signature: sig,
+                visibility: vis,
+                doc_comment: None,
+            });
+            if is_test {
+                tests.push(TestCase {
+                    name,
+                    file: path.to_string(),
+                    line: start,
+                    is_async: false,
+                });
+            }
+        }
+        "impl_item" => {
+            let type_name = extract_impl_type(node, source);
+            extract_impl_methods(node, source, &type_name, symbols, path);
+        }
+        "use_declaration" => {
+            let target = extract_scoped_use(node, source);
+            imports.push(Import {
+                source: path.to_string(),
+                target,
+                is_relative: false,
+                imported_names: Vec::new(),
+                line: start,
+            });
+        }
+        _ => {}
+    }
+}
+
 fn extract_ts_import(node: &tree_sitter::Node, source: &[u8], path: &str) -> Import {
     let text = node_text(node, source);
     let line = usize_to_u32(node.start_position().row + 1);
@@ -177,13 +318,150 @@ fn extract_ts_import(node: &tree_sitter::Node, source: &[u8], path: &str) -> Imp
     }
 }
 
+fn last_identifier(text: &str) -> Option<String> {
+    let trimmed = text.trim().trim_end_matches('!').trim();
+    let mut current = String::new();
+    let mut last = None;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            current.push(ch);
+        } else if !current.is_empty() {
+            last = Some(current.clone());
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        last = Some(current);
+    }
+    last
+}
+
+fn symbol_for_line(symbols: &[Symbol], line: u32) -> Option<String> {
+    symbols
+        .iter()
+        .filter(|sym| sym.start_line <= line && sym.end_line >= line)
+        .min_by_key(|sym| sym.end_line.saturating_sub(sym.start_line))
+        .map(|sym| sym.name.clone())
+}
+
+fn push_call(
+    calls: &mut Vec<CallSite>,
+    path: &str,
+    symbols: &[Symbol],
+    line: u32,
+    callee_text: &str,
+    confidence: f64,
+    resolution_strategy: &str,
+) {
+    let Some(callee) = last_identifier(callee_text) else {
+        return;
+    };
+    let caller = symbol_for_line(symbols, line).unwrap_or_else(|| path.to_string());
+    calls.push(CallSite {
+        caller,
+        callee,
+        file: path.to_string(),
+        line,
+        confidence,
+        resolution_strategy: Some(resolution_strategy.to_string()),
+    });
+}
+
+fn collect_rust_calls(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    path: &str,
+    symbols: &[Symbol],
+    calls: &mut Vec<CallSite>,
+) {
+    let line = usize_to_u32(node.start_position().row + 1);
+    match node.kind() {
+        "call_expression" => {
+            if let Some(function) = node.child_by_field_name("function") {
+                push_call(calls, path, symbols, line, &node_text(&function, source), 0.8, "ast_rust_call");
+            }
+        }
+        "method_call_expression" => {
+            if let Some(method) = node.child_by_field_name("method") {
+                push_call(calls, path, symbols, line, &node_text(&method, source), 0.9, "ast_rust_method");
+            }
+        }
+        "macro_invocation" => {
+            if let Some(macro_node) = node.child_by_field_name("macro") {
+                push_call(calls, path, symbols, line, &node_text(&macro_node, source), 0.7, "ast_rust_macro");
+            }
+        }
+        _ => {}
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_rust_calls(&child, source, path, symbols, calls);
+    }
+}
+
+fn collect_ts_calls(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    path: &str,
+    symbols: &[Symbol],
+    calls: &mut Vec<CallSite>,
+) {
+    let line = usize_to_u32(node.start_position().row + 1);
+    match node.kind() {
+        "call_expression" => {
+            if let Some(function) = node.child_by_field_name("function") {
+                push_call(calls, path, symbols, line, &node_text(&function, source), 0.8, "ast_ts_call");
+            }
+        }
+        "new_expression" => {
+            if let Some(constructor) = node.child_by_field_name("constructor") {
+                push_call(calls, path, symbols, line, &node_text(&constructor, source), 0.7, "ast_ts_new");
+            }
+        }
+        "jsx_opening_element" | "jsx_self_closing_element" => {
+            if let Some(name) = node.child_by_field_name("name") {
+                push_call(calls, path, symbols, line, &node_text(&name, source), 0.6, "ast_jsx_component");
+            }
+        }
+        _ => {}
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_ts_calls(&child, source, path, symbols, calls);
+    }
+}
+
+fn collect_py_calls(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    path: &str,
+    symbols: &[Symbol],
+    calls: &mut Vec<CallSite>,
+) {
+    let line = usize_to_u32(node.start_position().row + 1);
+    match node.kind() {
+        "call" => {
+            if let Some(function) = node.child_by_field_name("function") {
+                push_call(calls, path, symbols, line, &node_text(&function, source), 0.8, "ast_py_call");
+            }
+        }
+        "decorator" => {
+            push_call(calls, path, symbols, line, &node_text(node, source), 0.6, "ast_py_decorator");
+        }
+        _ => {}
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_py_calls(&child, source, path, symbols, calls);
+    }
+}
+
 // ── Rust Parser ──────────────────────────────────────────
 
 fn parse_rust(path: &str, source: &str) -> ParsedFile {
     let mut symbols = Vec::new();
     let mut imports = Vec::new();
     let mut tests = Vec::new();
-    let _calls = Vec::new();
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&tree_sitter_rust::LANGUAGE.into())
@@ -197,137 +475,25 @@ fn parse_rust(path: &str, source: &str) -> ParsedFile {
     };
     let root = tree.root_node();
     let source_bytes = source.as_bytes();
-    for i in 0..root.child_count() {
-        let node = root.child(i).unwrap();
-        let kind = node.kind();
-        let start = usize_to_u32(node.start_position().row + 1);
-        let end = usize_to_u32(node.end_position().row + 1);
-        match kind {
-            "mod_item" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
-                symbols.push(Symbol {
-                    id: None,
-                    file_path: path.to_string(),
-                    name,
-                    kind: "module".into(),
-                    start_line: start,
-                    end_line: end,
-                    signature: None,
-                    visibility: visibility_from_node(&node, source_bytes),
-                    doc_comment: None,
-                });
-            }
-            "struct_item" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
-                let vis = visibility_from_node(&node, source_bytes);
-                let sig = format!(
-                    "{}struct {}",
-                    vis.as_deref()
-                        .map(|v| format!("{} ", v))
-                        .unwrap_or_default(),
-                    name
-                );
-                symbols.push(Symbol {
-                    id: None,
-                    file_path: path.to_string(),
-                    name: name.clone(),
-                    kind: "struct".into(),
-                    start_line: start,
-                    end_line: end,
-                    signature: Some(sig),
-                    visibility: vis,
-                    doc_comment: None,
-                });
-                extract_impl_methods(&node, source_bytes, &name, &mut symbols, path);
-            }
-            "enum_item" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
-                symbols.push(Symbol {
-                    id: None,
-                    file_path: path.to_string(),
-                    name,
-                    kind: "enum".into(),
-                    start_line: start,
-                    end_line: end,
-                    signature: None,
-                    visibility: visibility_from_node(&node, source_bytes),
-                    doc_comment: None,
-                });
-            }
-            "trait_item" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
-                symbols.push(Symbol {
-                    id: None,
-                    file_path: path.to_string(),
-                    name,
-                    kind: "trait".into(),
-                    start_line: start,
-                    end_line: end,
-                    signature: None,
-                    visibility: visibility_from_node(&node, source_bytes),
-                    doc_comment: None,
-                });
-            }
-            "function_item" | "function_signature_item" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
-                if name == "main" {
-                    continue;
-                }
-                let vis = visibility_from_node(&node, source_bytes);
-                let attr_start = node.start_byte().saturating_sub(256);
-                let attrs = &source[attr_start..node.start_byte()];
-                let is_test = attrs.contains("#[test]")
-                    || attrs.contains("#[tokio::test]")
-                    || attrs.contains("#[async_std::test]");
-                let sig = extract_function_signature(&node, source_bytes);
-                symbols.push(Symbol {
-                    id: None,
-                    file_path: path.to_string(),
-                    name: name.clone(),
-                    kind: if is_test { "test" } else { "function" }.into(),
-                    start_line: start,
-                    end_line: end,
-                    signature: sig,
-                    visibility: vis,
-                    doc_comment: None,
-                });
-                if is_test {
-                    tests.push(TestCase {
-                        name,
-                        file: path.to_string(),
-                        line: start,
-                        is_async: false,
-                    });
-                }
-            }
-            "impl_item" => {
-                let type_name = extract_impl_type(&node, source_bytes);
-                extract_impl_methods(&node, source_bytes, &type_name, &mut symbols, path);
-            }
-            "use_declaration" => {
-                let target = extract_scoped_use(&node, source_bytes);
-                imports.push(Import {
-                    source: path.to_string(),
-                    target,
-                    is_relative: false,
-                    imported_names: Vec::new(),
-                    line: start,
-                });
-            }
-            _ => {}
-        }
+    let mut cursor = root.walk();
+    for node in root.children(&mut cursor) {
+        collect_rust_items(&node, source_bytes, path, &mut symbols, &mut imports, &mut tests);
     }
+    let mut calls = Vec::new();
+    collect_rust_calls(&root, source_bytes, path, &symbols, &mut calls);
+    calls.sort_by(|a, b| {
+        a.line
+            .cmp(&b.line)
+            .then_with(|| a.caller.cmp(&b.caller))
+            .then_with(|| a.callee.cmp(&b.callee))
+    });
+    calls.dedup_by(|a, b| a.line == b.line && a.caller == b.caller && a.callee == b.callee);
     ParsedFile {
         path: path.to_string(),
         language: "rust".into(),
         symbols,
         imports,
-        calls: _calls,
+        calls,
         tests,
         hash: String::new(),
         size_bytes: 0,
@@ -341,7 +507,6 @@ fn parse_typescript(path: &str, source: &str) -> ParsedFile {
     let mut symbols = Vec::new();
     let mut imports = Vec::new();
     let _tests = Vec::new();
-    let _calls = Vec::new();
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
@@ -500,12 +665,21 @@ fn parse_typescript(path: &str, source: &str) -> ParsedFile {
             _ => {}
         }
     }
+    let mut calls = Vec::new();
+    collect_ts_calls(&root, source_bytes, path, &symbols, &mut calls);
+    calls.sort_by(|a, b| {
+        a.line
+            .cmp(&b.line)
+            .then_with(|| a.caller.cmp(&b.caller))
+            .then_with(|| a.callee.cmp(&b.callee))
+    });
+    calls.dedup_by(|a, b| a.line == b.line && a.caller == b.caller && a.callee == b.callee);
     ParsedFile {
         path: path.to_string(),
         language: "typescript".into(),
         symbols,
         imports,
-        calls: _calls,
+        calls,
         tests: _tests,
         hash: String::new(),
         size_bytes: 0,
@@ -519,7 +693,6 @@ fn parse_javascript(path: &str, source: &str) -> ParsedFile {
     let mut symbols = Vec::new();
     let mut imports = Vec::new();
     let _tests = Vec::new();
-    let _calls = Vec::new();
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&tree_sitter_javascript::LANGUAGE.into())
@@ -559,12 +732,21 @@ fn parse_javascript(path: &str, source: &str) -> ParsedFile {
             _ => {}
         }
     }
+    let mut calls = Vec::new();
+    collect_ts_calls(&root, source_bytes, path, &symbols, &mut calls);
+    calls.sort_by(|a, b| {
+        a.line
+            .cmp(&b.line)
+            .then_with(|| a.caller.cmp(&b.caller))
+            .then_with(|| a.callee.cmp(&b.callee))
+    });
+    calls.dedup_by(|a, b| a.line == b.line && a.caller == b.caller && a.callee == b.callee);
     ParsedFile {
         path: path.to_string(),
         language: "javascript".into(),
         symbols,
         imports,
-        calls: _calls,
+        calls,
         tests: _tests,
         hash: String::new(),
         size_bytes: 0,
@@ -578,7 +760,6 @@ fn parse_python(path: &str, source: &str) -> ParsedFile {
     let mut symbols = Vec::new();
     let mut imports = Vec::new();
     let mut tests = Vec::new();
-    let _calls = Vec::new();
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&tree_sitter_python::LANGUAGE.into())
@@ -651,12 +832,21 @@ fn parse_python(path: &str, source: &str) -> ParsedFile {
             _ => {}
         }
     }
+    let mut calls = Vec::new();
+    collect_py_calls(&root, source_bytes, path, &symbols, &mut calls);
+    calls.sort_by(|a, b| {
+        a.line
+            .cmp(&b.line)
+            .then_with(|| a.caller.cmp(&b.caller))
+            .then_with(|| a.callee.cmp(&b.callee))
+    });
+    calls.dedup_by(|a, b| a.line == b.line && a.caller == b.caller && a.callee == b.callee);
     ParsedFile {
         path: path.to_string(),
         language: "python".into(),
         symbols,
         imports,
-        calls: _calls,
+        calls,
         tests,
         hash: String::new(),
         size_bytes: 0,
@@ -675,5 +865,51 @@ fn empty_parsed(path: &str, language: &str) -> ParsedFile {
         hash: String::new(),
         size_bytes: 0,
         loc: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_file;
+
+    #[test]
+    fn parses_rust_calls_from_ast() {
+        let source = r#"
+fn helper() {}
+
+fn top() {
+    helper();
+}
+"#;
+        let parsed = parse_file("src/lib.rs", source).expect("parse rust");
+        assert!(parsed.calls.iter().any(|call| call.caller == "top" && call.callee == "helper"));
+    }
+
+    #[test]
+    fn parses_typescript_calls_from_ast() {
+        let source = r#"
+function helper() {}
+
+export function top() {
+  helper();
+}
+"#;
+        let parsed = parse_file("src/app.ts", source).expect("parse typescript");
+        assert!(parsed.calls.iter().any(|call| call.caller == "top" && call.callee == "helper"));
+    }
+
+    #[test]
+    fn parses_nested_rust_test_functions() {
+        let source = r#"
+mod tests {
+    #[test]
+    fn test_parse_rust() {
+        parse_rust("src/example.rs", "");
+    }
+}
+"#;
+        let parsed = parse_file("src/lib.rs", source).expect("parse nested rust tests");
+        assert!(parsed.symbols.iter().any(|symbol| symbol.kind == "test" && symbol.name == "test_parse_rust"));
+        assert!(parsed.tests.iter().any(|test| test.name == "test_parse_rust"));
     }
 }

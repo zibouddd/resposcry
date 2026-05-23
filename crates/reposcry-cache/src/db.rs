@@ -5,7 +5,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 use reposcry_graph::edge::EdgeKind;
-use reposcry_graph::symbol::{Import, Symbol};
+use reposcry_graph::symbol::{CallSite, Import, Symbol};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedFile {
@@ -37,6 +37,41 @@ pub struct CachedEdge {
     pub target_path: Option<String>,
     pub kind: String,
     pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedCallSite {
+    pub id: i64,
+    pub file_id: i64,
+    pub caller: String,
+    pub callee: String,
+    pub line: u32,
+    pub confidence: f64,
+    pub resolution_strategy: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedSymbolEdge {
+    pub id: i64,
+    pub source_symbol_id: i64,
+    pub target_symbol_id: i64,
+    pub source_file_id: i64,
+    pub target_file_id: i64,
+    pub kind: String,
+    pub line: u32,
+    pub confidence: f64,
+    pub resolution_strategy: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedSearchHit {
+    pub node_id: i64,
+    pub file_path: String,
+    pub kind: String,
+    pub name: String,
+    pub signature: Option<String>,
+    pub score: f64,
+    pub match_reason: String,
 }
 
 pub struct CacheDb {
@@ -105,6 +140,41 @@ impl CacheDb {
                 confidence REAL NOT NULL DEFAULT 1.0,
                 FOREIGN KEY (source_file_id) REFERENCES files(id) ON DELETE CASCADE,
                 FOREIGN KEY (target_file_id) REFERENCES files(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS call_sites (
+                id INTEGER PRIMARY KEY,
+                file_id INTEGER NOT NULL,
+                caller TEXT NOT NULL,
+                callee TEXT NOT NULL,
+                line INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 1.0,
+                resolution_strategy TEXT,
+                FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS symbol_edges (
+                id INTEGER PRIMARY KEY,
+                source_symbol_id INTEGER NOT NULL,
+                target_symbol_id INTEGER NOT NULL,
+                source_file_id INTEGER NOT NULL,
+                target_file_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                line INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 1.0,
+                resolution_strategy TEXT,
+                FOREIGN KEY (source_symbol_id) REFERENCES symbols(id) ON DELETE CASCADE,
+                FOREIGN KEY (target_symbol_id) REFERENCES symbols(id) ON DELETE CASCADE,
+                FOREIGN KEY (source_file_id) REFERENCES files(id) ON DELETE CASCADE,
+                FOREIGN KEY (target_file_id) REFERENCES files(id) ON DELETE CASCADE
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+                node_id UNINDEXED,
+                file_path,
+                kind,
+                name,
+                signature,
+                doc_comment,
+                imports,
+                content
             );
             CREATE TABLE IF NOT EXISTS git_changes (
                 id INTEGER PRIMARY KEY,
@@ -244,6 +314,26 @@ impl CacheDb {
         Ok(())
     }
 
+    pub fn insert_call_sites(&self, file_id: i64, call_sites: &[CallSite]) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM call_sites WHERE file_id = ?1", params![file_id])?;
+        for call_site in call_sites {
+            self.conn.execute(
+                "INSERT INTO call_sites (file_id, caller, callee, line, confidence, resolution_strategy) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    file_id,
+                    call_site.caller,
+                    call_site.callee,
+                    call_site.line,
+                    call_site.confidence,
+                    call_site.resolution_strategy,
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn get_symbols_by_file(&self, file_id: i64) -> Result<Vec<Symbol>> {
         let mut stmt = self.conn.prepare(
             "SELECT s.id, s.name, s.kind, s.start_line, s.end_line, s.signature, s.visibility, s.doc_comment, f.path \
@@ -310,9 +400,62 @@ impl CacheDb {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn get_call_sites_by_file(&self, file_id: i64) -> Result<Vec<CachedCallSite>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_id, caller, callee, line, confidence, resolution_strategy \
+             FROM call_sites WHERE file_id = ?1 \
+             ORDER BY line ASC, callee ASC",
+        )?;
+        let rows = stmt.query_map(params![file_id], |row| {
+            Ok(CachedCallSite {
+                id: row.get(0)?,
+                file_id: row.get(1)?,
+                caller: row.get(2)?,
+                callee: row.get(3)?,
+                line: row.get::<_, i64>(4)? as u32,
+                confidence: row.get(5)?,
+                resolution_strategy: row.get(6)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn get_all_call_sites(&self) -> Result<Vec<CachedCallSite>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, file_id, caller, callee, line, confidence, resolution_strategy \
+             FROM call_sites \
+             ORDER BY file_id ASC, line ASC, callee ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(CachedCallSite {
+                id: row.get(0)?,
+                file_id: row.get(1)?,
+                caller: row.get(2)?,
+                callee: row.get(3)?,
+                line: row.get::<_, i64>(4)? as u32,
+                confidence: row.get(5)?,
+                resolution_strategy: row.get(6)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     pub fn clear_edges_by_kind(&self, kind: EdgeKind) -> Result<()> {
         self.conn
             .execute("DELETE FROM edges WHERE kind = ?1", params![kind.as_str()])?;
+        Ok(())
+    }
+
+    pub fn clear_symbol_edges_by_kind(&self, kind: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM symbol_edges WHERE kind = ?1",
+            params![kind],
+        )?;
+        Ok(())
+    }
+
+    pub fn clear_search_index(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM search_index", [])?;
         Ok(())
     }
 
@@ -357,6 +500,129 @@ impl CacheDb {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn insert_symbol_edges(&self, edges: &[CachedSymbolEdge]) -> Result<()> {
+        for edge in edges {
+            self.conn.execute(
+                "INSERT INTO symbol_edges (source_symbol_id, target_symbol_id, source_file_id, target_file_id, kind, line, confidence, resolution_strategy) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    edge.source_symbol_id,
+                    edge.target_symbol_id,
+                    edge.source_file_id,
+                    edge.target_file_id,
+                    edge.kind,
+                    edge.line,
+                    edge.confidence,
+                    edge.resolution_strategy,
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn get_symbol_edges_by_kind(&self, kind: &str) -> Result<Vec<CachedSymbolEdge>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, source_symbol_id, target_symbol_id, source_file_id, target_file_id, kind, line, confidence, resolution_strategy \
+             FROM symbol_edges WHERE kind = ?1 \
+             ORDER BY source_symbol_id ASC, target_symbol_id ASC, line ASC",
+        )?;
+        let rows = stmt.query_map(params![kind], |row| {
+            Ok(CachedSymbolEdge {
+                id: row.get(0)?,
+                source_symbol_id: row.get(1)?,
+                target_symbol_id: row.get(2)?,
+                source_file_id: row.get(3)?,
+                target_file_id: row.get(4)?,
+                kind: row.get(5)?,
+                line: row.get::<_, i64>(6)? as u32,
+                confidence: row.get(7)?,
+                resolution_strategy: row.get(8)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn insert_search_document(
+        &self,
+        node_id: i64,
+        file_path: &str,
+        kind: &str,
+        name: &str,
+        signature: Option<&str>,
+        doc_comment: Option<&str>,
+        imports: &str,
+        content: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO search_index (node_id, file_path, kind, name, signature, doc_comment, imports, content) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                node_id,
+                file_path,
+                kind,
+                name,
+                signature,
+                doc_comment,
+                imports,
+                content,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn search_nodes_fts(
+        &self,
+        query: &str,
+        kind: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<CachedSearchHit>> {
+        let limit = i64::try_from(limit).unwrap_or(50);
+        let hits = if let Some(kind) = kind {
+            let mut stmt = self.conn.prepare(
+                "SELECT node_id, file_path, kind, name, signature, bm25(search_index) \
+                 FROM search_index \
+                 WHERE search_index MATCH ?1 AND kind = ?2 \
+                 ORDER BY bm25(search_index) \
+                 LIMIT ?3",
+            )?;
+            let rows = stmt.query_map(params![query, kind, limit], |row| {
+                let score: f64 = row.get(5)?;
+                Ok(CachedSearchHit {
+                    node_id: row.get(0)?,
+                    file_path: row.get(1)?,
+                    kind: row.get(2)?,
+                    name: row.get(3)?,
+                    signature: row.get(4)?,
+                    score: -score,
+                    match_reason: "fts5".to_string(),
+                })
+            })?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        } else {
+            let mut stmt = self.conn.prepare(
+                "SELECT node_id, file_path, kind, name, signature, bm25(search_index) \
+                 FROM search_index \
+                 WHERE search_index MATCH ?1 \
+                 ORDER BY bm25(search_index) \
+                 LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![query, limit], |row| {
+                let score: f64 = row.get(5)?;
+                Ok(CachedSearchHit {
+                    node_id: row.get(0)?,
+                    file_path: row.get(1)?,
+                    kind: row.get(2)?,
+                    name: row.get(3)?,
+                    signature: row.get(4)?,
+                    score: -score,
+                    match_reason: "fts5".to_string(),
+                })
+            })?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        Ok(hits)
+    }
+
     pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO config (key, value) VALUES (?1, ?2) \
@@ -396,6 +662,20 @@ impl CacheDb {
         let count: i64 = self
             .conn
             .query_row("SELECT COUNT(*) FROM imports", [], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    pub fn call_site_count(&self) -> Result<i64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM call_sites", [], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    pub fn symbol_edge_count(&self) -> Result<i64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM symbol_edges", [], |row| row.get(0))?;
         Ok(count)
     }
 
