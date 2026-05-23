@@ -1,5 +1,5 @@
 ﻿{
-    "captured_at":  "2026-05-23T13:47:00.6715156Z",
+    "captured_at":  "2026-05-23T13:50:32.6867705Z",
     "machine":  {
                     "os":  "Microsoft Windows [version 10.0.26200.8457]",
                     "cpu":  "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
@@ -11,20 +11,20 @@
                  "fixture_manifest":  "benchmarks/fixtures.json"
              },
     "metrics":  {
-                    "cold_index_ms":  6634,
-                    "warm_index_ms":  6896,
-                    "call_warmup_ms":  null,
-                    "architecture_overview_ms":  225,
-                    "detect_changes_ms":  190,
-                    "affected_flows_ms":  164,
-                    "query_graph_callers_ms":  54,
-                    "semantic_search_ms":  230,
-                    "db_size_bytes":  1810432,
+                    "cold_index_ms":  10919,
+                    "warm_index_ms":  8249,
+                    "call_warmup_ms":  2517,
+                    "architecture_overview_ms":  59,
+                    "detect_changes_ms":  152,
+                    "affected_flows_ms":  143,
+                    "query_graph_callers_ms":  38,
+                    "semantic_search_ms":  233,
+                    "db_size_bytes":  1908736,
                     "files_indexed":  47,
-                    "symbols_indexed":  421,
+                    "symbols_indexed":  423,
                     "imports_indexed":  127,
-                    "persisted_call_sites":  3665,
-                    "persisted_symbol_call_edges":  685,
+                    "persisted_call_sites":  3680,
+                    "persisted_symbol_call_edges":  690,
                     "persisted_file_call_edges":  31,
                     "total_edges":  60
                 }

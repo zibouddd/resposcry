@@ -38,6 +38,7 @@ run_json_command() {
 
 cold_index_ms=$(measure_ms "$REPOSCRY_BIN" --repo . index)
 warm_index_ms=$(measure_ms "$REPOSCRY_BIN" --repo . index)
+call_warmup_ms=$(measure_ms "$REPOSCRY_BIN" --repo . warm-calls)
 arch_ms=$(measure_ms "$REPOSCRY_BIN" --repo . get_architecture_overview --format json)
 detect_changes_ms=$(measure_ms "$REPOSCRY_BIN" --repo . detect_changes main HEAD --format json)
 affected_flows_ms=$(measure_ms "$REPOSCRY_BIN" --repo . get_affected_flows main HEAD --format json)
@@ -73,7 +74,7 @@ result = {
     "metrics": {
         "cold_index_ms": $cold_index_ms,
         "warm_index_ms": $warm_index_ms,
-        "call_warmup_ms": None,
+        "call_warmup_ms": $call_warmup_ms,
         "architecture_overview_ms": $arch_ms,
         "detect_changes_ms": $detect_changes_ms,
         "affected_flows_ms": $affected_flows_ms,

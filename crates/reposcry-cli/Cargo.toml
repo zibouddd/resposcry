@@ -27,3 +27,5 @@ tracing-appender = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
 blake3 = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+fastembed = { version = "5.13.4", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls", "nomic-v2-moe", "qwen3"] }
+candle-core = "0.10.2"

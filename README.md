@@ -39,6 +39,7 @@ Initialize and index the current repository:
 ```bash
 reposcry init
 reposcry index
+reposcry warm-calls
 reposcry stats
 ```
 
@@ -68,6 +69,12 @@ Use the full-index command when you want one command for an install-time index p
 
 ```bash
 reposcry --repo . index-full
+```
+
+If you already indexed files and only want to rebuild persisted call edges:
+
+```bash
+reposcry --repo . warm-calls
 ```
 
 ## CRG-compatible commands
@@ -125,6 +132,44 @@ The SQLite cache lives in:
 
 ```text
 .reposcry/reposcry.db
+```
+
+## Semantic backends
+
+Semantic search works without external services by default with `local-hash-v1`.
+
+Additional configured backends:
+
+- `ollama`
+- `fastembed`
+- `candle`
+
+`fastembed` now defaults its writable cache under `.reposcry/hf-home` when `HF_HOME` is not set. You can override that location with `REPOSCRY_FASTEMBED_CACHE_DIR`.
+`candle` uses the same writable Hugging Face cache root and supports:
+- `REPOSCRY_CANDLE_MODEL=qwen3` with default repo `Qwen/Qwen3-Embedding-0.6B`
+- `REPOSCRY_CANDLE_MODEL=nomic-v2-moe` with repo `nomic-ai/nomic-embed-text-v2-moe`
+
+You can override the repo with `REPOSCRY_CANDLE_REPO` and the cache location with `REPOSCRY_CANDLE_CACHE_DIR`.
+
+Examples:
+
+```bash
+set REPOSCRY_SEMANTIC_BACKEND=fastembed
+set REPOSCRY_FASTEMBED_MODEL=AllMiniLML6V2
+reposcry index
+reposcry semantic_search_nodes "cache database calls" --semantic
+```
+
+```bash
+set REPOSCRY_SEMANTIC_BACKEND=ollama
+set REPOSCRY_OLLAMA_MODEL=nomic-embed-text
+reposcry semantic_search_nodes "cache database calls" --semantic
+```
+
+```bash
+set REPOSCRY_SEMANTIC_BACKEND=candle
+set REPOSCRY_CANDLE_MODEL=qwen3
+reposcry semantic_search_nodes "cache database calls" --semantic
 ```
 
 ## Benchmarks

@@ -16,6 +16,7 @@ reposcry query_graph "imported_by crates/reposcry-cache/src/db.rs"
 reposcry query_graph "symbols_in crates/reposcry-cli/src/main.rs"
 reposcry query_graph "tests_for crates/reposcry-cache/src/db.rs"
 reposcry semantic_search_nodes "cache db" --kind function --limit 20
+reposcry semantic_search_nodes "cache db" --limit 20 --semantic
 reposcry get_architecture_overview --format markdown
 reposcry refactor_tool dead-code
 reposcry refactor_tool rename CacheDb RepoCacheDb

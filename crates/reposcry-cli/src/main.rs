@@ -1,9 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Duration;
 
+use candle_core::{DType, Device};
 use clap::{Parser, Subcommand};
+use fastembed::{
+    EmbeddingModel, InitOptions, NomicV2MoeTextEmbedding, Qwen3TextEmbedding, TextEmbedding,
+};
 use serde::Serialize;
 
 #[allow(dead_code)]
@@ -33,6 +38,8 @@ const IGNORE_FILE: &str = ".reposcryignore";
 const LOCAL_SEMANTIC_BACKEND: &str = "local-hash-v1";
 const LOCAL_SEMANTIC_DIMS: usize = 64;
 const OLLAMA_BACKEND: &str = "ollama";
+const FASTEMBED_BACKEND: &str = "fastembed";
+const CANDLE_BACKEND: &str = "candle";
 
 #[derive(Parser)]
 #[command(name = "reposcry", version, about = "RepoScry — AI context engine")]
@@ -155,6 +162,9 @@ enum Commands {
         #[arg(long)]
         preset: Option<String>,
     },
+    /// Rebuild persisted call edges from indexed call sites
+    #[command(name = "warm-calls", visible_alias = "warm_calls")]
+    WarmCalls,
     /// Reviewing code changes - gives risk-scored analysis.
     #[command(name = "detect_changes", visible_alias = "detect-changes")]
     DetectChanges {
@@ -359,6 +369,7 @@ fn main() -> anyhow::Result<()> {
         Commands::IndexFull { preset } => {
             cmd_index_full(&repo_root, &reposcry_dir, &db_path, preset.as_deref())
         }
+        Commands::WarmCalls => cmd_warm_calls(&repo_root, &db_path),
         Commands::DetectChanges { base, head, format } => crg_cli::run_command(
             &repo_root,
             &db_path,
@@ -479,6 +490,16 @@ struct FullIndexOutput {
     repo: String,
     steps: Vec<FullIndexStepResult>,
     summary: FullIndexSummary,
+}
+
+#[derive(Debug, Serialize)]
+struct WarmCallsOutput {
+    tool: String,
+    repo: String,
+    elapsed_ms: i64,
+    persisted_call_sites: i64,
+    persisted_symbol_call_edges: i64,
+    persisted_file_call_edges: usize,
 }
 
 fn ensure_reposcry_dir(reposcry_dir: &Path) -> anyhow::Result<()> {
@@ -733,6 +754,22 @@ fn cmd_index_full(
     Ok(())
 }
 
+fn cmd_warm_calls(repo_root: &Path, db_path: &Path) -> anyhow::Result<()> {
+    let started = std::time::Instant::now();
+    let db = CacheDb::open(db_path)?;
+    rebuild_persisted_call_edges(&db)?;
+    let output = WarmCallsOutput {
+        tool: "reposcry".to_string(),
+        repo: repo_root.display().to_string(),
+        elapsed_ms: started.elapsed().as_millis() as i64,
+        persisted_call_sites: db.call_site_count()?,
+        persisted_symbol_call_edges: db.symbol_edge_count()?,
+        persisted_file_call_edges: db.get_edges_by_kind(EdgeKind::Calls)?.len(),
+    };
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
 fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
     let files = db.get_all_files()?;
     db.clear_search_index()?;
@@ -807,6 +844,13 @@ fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
 enum SemanticBackend {
     LocalHash,
     Ollama { url: String, model: String },
+    Fastembed { model: Mutex<TextEmbedding> },
+    Candle { model: CandleModel },
+}
+
+enum CandleModel {
+    NomicV2Moe(NomicV2MoeTextEmbedding),
+    Qwen3(Qwen3TextEmbedding),
 }
 
 impl SemanticBackend {
@@ -814,6 +858,8 @@ impl SemanticBackend {
         match self {
             Self::LocalHash => LOCAL_SEMANTIC_BACKEND,
             Self::Ollama { .. } => OLLAMA_BACKEND,
+            Self::Fastembed { .. } => FASTEMBED_BACKEND,
+            Self::Candle { .. } => CANDLE_BACKEND,
         }
     }
 
@@ -821,6 +867,8 @@ impl SemanticBackend {
         match self {
             Self::LocalHash => Ok(local_text_embedding(text)),
             Self::Ollama { url, model } => ollama_embedding(url, model, text),
+            Self::Fastembed { model } => fastembed_embedding(model, text),
+            Self::Candle { model } => candle_embedding(model, text),
         }
     }
 }
@@ -836,6 +884,24 @@ fn configured_semantic_backend(db: &CacheDb) -> anyhow::Result<SemanticBackend> 
                 .unwrap_or_else(|_| "http://127.0.0.1:11434/api/embeddings".to_string()),
             model: env::var("REPOSCRY_OLLAMA_MODEL")
                 .unwrap_or_else(|_| "nomic-embed-text".to_string()),
+        }),
+        FASTEMBED_BACKEND => {
+            let model_name = env::var("REPOSCRY_FASTEMBED_MODEL")
+                .unwrap_or_else(|_| "AllMiniLML6V2".to_string());
+            Ok(SemanticBackend::Fastembed {
+                model: Mutex::new(build_fastembed_model(&model_name)?),
+            })
+        }
+        CANDLE_BACKEND => Ok(SemanticBackend::Candle {
+            model: build_candle_model(
+                &env::var("REPOSCRY_CANDLE_MODEL").unwrap_or_else(|_| "qwen3".to_string()),
+                &env::var("REPOSCRY_CANDLE_REPO")
+                    .unwrap_or_else(|_| "Qwen/Qwen3-Embedding-0.6B".to_string()),
+                env::var("REPOSCRY_CANDLE_MAX_LENGTH")
+                    .ok()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(512),
+            )?,
         }),
         _ => Ok(SemanticBackend::LocalHash),
     }
@@ -889,6 +955,104 @@ fn ollama_embedding(url: &str, model: &str, text: &str) -> anyhow::Result<Vec<f3
         return Err(anyhow::anyhow!("ollama returned an empty embedding"));
     }
     Ok(vector)
+}
+
+fn build_fastembed_model(model_name: &str) -> anyhow::Result<TextEmbedding> {
+    let model = match model_name {
+        "BGESmallENV15" => EmbeddingModel::BGESmallENV15,
+        "BGEBaseENV15" => EmbeddingModel::BGEBaseENV15,
+        "AllMiniLML6V2" => EmbeddingModel::AllMiniLML6V2,
+        "AllMiniLML12V2" => EmbeddingModel::AllMiniLML12V2,
+        other => {
+            return Err(anyhow::anyhow!(
+                "unsupported REPOSCRY_FASTEMBED_MODEL `{}`; supported values: AllMiniLML6V2, AllMiniLML12V2, BGEBaseENV15, BGESmallENV15",
+                other
+            ))
+        }
+    };
+    let mut options = InitOptions::new(model);
+    let cache_dir: PathBuf = env::var("REPOSCRY_FASTEMBED_CACHE_DIR")
+        .or_else(|_| env::var("HF_HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(".reposcry")
+                .join("hf-home")
+        });
+    if env::var("HF_HOME").is_err() {
+        env::set_var("HF_HOME", &cache_dir);
+    }
+    std::fs::create_dir_all(&cache_dir)?;
+    options = options.with_cache_dir(cache_dir);
+    Ok(TextEmbedding::try_new(options)?)
+}
+
+fn fastembed_embedding(model: &Mutex<TextEmbedding>, text: &str) -> anyhow::Result<Vec<f32>> {
+    let mut model = model
+        .lock()
+        .map_err(|_| anyhow::anyhow!("fastembed model mutex poisoned"))?;
+    let embeddings = model.embed(vec![text], None)?;
+    embeddings
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("fastembed returned no embedding for input"))
+}
+
+fn build_candle_model(
+    model_kind: &str,
+    repo_id: &str,
+    max_length: usize,
+) -> anyhow::Result<CandleModel> {
+    let _cache_dir = ensure_hf_home("REPOSCRY_CANDLE_CACHE_DIR")?;
+    match model_kind {
+        "nomic-v2-moe" | "nomic_v2_moe" | "nomic" => {
+            NomicV2MoeTextEmbedding::from_hf(repo_id, &Device::Cpu, DType::F32, max_length)
+                .map(CandleModel::NomicV2Moe)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))
+        }
+        "qwen3" | "qwen" => {
+            Qwen3TextEmbedding::from_hf(repo_id, &Device::Cpu, DType::F32, max_length)
+                .map(CandleModel::Qwen3)
+                .map_err(|error| anyhow::anyhow!(error.to_string()))
+        }
+        other => Err(anyhow::anyhow!(
+            "unsupported REPOSCRY_CANDLE_MODEL `{}`; supported values: qwen3, nomic-v2-moe",
+            other
+        )),
+    }
+}
+
+fn candle_embedding(model: &CandleModel, text: &str) -> anyhow::Result<Vec<f32>> {
+    let embeddings = match model {
+        CandleModel::NomicV2Moe(model) => model
+            .embed(&[text])
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+        CandleModel::Qwen3(model) => model
+            .embed(&[text])
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+    };
+    embeddings
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("candle backend returned no embedding for input"))
+}
+
+fn ensure_hf_home(cache_env_var: &str) -> anyhow::Result<PathBuf> {
+    let cache_dir: PathBuf = env::var(cache_env_var)
+        .or_else(|_| env::var("HF_HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(".reposcry")
+                .join("hf-home")
+        });
+    if env::var("HF_HOME").is_err() {
+        env::set_var("HF_HOME", &cache_dir);
+    }
+    std::fs::create_dir_all(&cache_dir)?;
+    Ok(cache_dir)
 }
 
 fn rebuild_persisted_import_edges(db: &CacheDb) -> anyhow::Result<()> {

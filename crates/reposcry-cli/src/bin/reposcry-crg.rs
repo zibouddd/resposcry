@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use candle_core::{DType, Device};
 use clap::{Parser, Subcommand};
+use fastembed::{
+    EmbeddingModel, InitOptions, NomicV2MoeTextEmbedding, Qwen3TextEmbedding, TextEmbedding,
+};
 use reposcry_cache::db::{CacheDb, CachedFile};
 use reposcry_context::{ContextBuilder, ContextConfig, OutputFormat};
 use reposcry_git::{GitChange, GitIntegration};
@@ -20,6 +24,8 @@ const CACHE_DB: &str = "reposcry.db";
 const LOCAL_SEMANTIC_BACKEND: &str = "local-hash-v1";
 const LOCAL_SEMANTIC_DIMS: usize = 64;
 const OLLAMA_BACKEND: &str = "ollama";
+const FASTEMBED_BACKEND: &str = "fastembed";
+const CANDLE_BACKEND: &str = "candle";
 
 #[derive(Parser)]
 #[command(
@@ -1508,6 +1514,24 @@ fn embed_query(query: &str, backend: &str) -> Result<Vec<f32>> {
             &env::var("REPOSCRY_OLLAMA_MODEL").unwrap_or_else(|_| "nomic-embed-text".to_string()),
             query,
         ),
+        FASTEMBED_BACKEND => {
+            let model_name = env::var("REPOSCRY_FASTEMBED_MODEL")
+                .unwrap_or_else(|_| "AllMiniLML6V2".to_string());
+            let mut model = build_fastembed_model(&model_name)?;
+            fastembed_embedding(&mut model, query)
+        }
+        CANDLE_BACKEND => {
+            let model = build_candle_model(
+                &env::var("REPOSCRY_CANDLE_MODEL").unwrap_or_else(|_| "qwen3".to_string()),
+                &env::var("REPOSCRY_CANDLE_REPO")
+                    .unwrap_or_else(|_| "Qwen/Qwen3-Embedding-0.6B".to_string()),
+                env::var("REPOSCRY_CANDLE_MAX_LENGTH")
+                    .ok()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(512),
+            )?;
+            candle_embedding(&model, query)
+        }
         _ => Ok(local_text_embedding(query)),
     }
 }
@@ -1578,6 +1602,102 @@ fn ollama_embedding(url: &str, model: &str, text: &str) -> Result<Vec<f32>> {
         return Err(anyhow!("ollama returned an empty embedding"));
     }
     Ok(vector)
+}
+
+fn build_fastembed_model(model_name: &str) -> Result<TextEmbedding> {
+    let model = match model_name {
+        "BGESmallENV15" => EmbeddingModel::BGESmallENV15,
+        "BGEBaseENV15" => EmbeddingModel::BGEBaseENV15,
+        "AllMiniLML6V2" => EmbeddingModel::AllMiniLML6V2,
+        "AllMiniLML12V2" => EmbeddingModel::AllMiniLML12V2,
+        other => {
+            return Err(anyhow!(
+                "unsupported REPOSCRY_FASTEMBED_MODEL `{}`; supported values: AllMiniLML6V2, AllMiniLML12V2, BGEBaseENV15, BGESmallENV15",
+                other
+            ))
+        }
+    };
+    let mut options = InitOptions::new(model);
+    let cache_dir: PathBuf = env::var("REPOSCRY_FASTEMBED_CACHE_DIR")
+        .or_else(|_| env::var("HF_HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(".reposcry")
+                .join("hf-home")
+        });
+    if env::var("HF_HOME").is_err() {
+        env::set_var("HF_HOME", &cache_dir);
+    }
+    std::fs::create_dir_all(&cache_dir)?;
+    options = options.with_cache_dir(cache_dir);
+    Ok(TextEmbedding::try_new(options)?)
+}
+
+fn fastembed_embedding(model: &mut TextEmbedding, text: &str) -> Result<Vec<f32>> {
+    let embeddings = model.embed(vec![text], None)?;
+    embeddings
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("fastembed returned no embedding for input"))
+}
+
+enum CandleModel {
+    NomicV2Moe(NomicV2MoeTextEmbedding),
+    Qwen3(Qwen3TextEmbedding),
+}
+
+fn build_candle_model(model_kind: &str, repo_id: &str, max_length: usize) -> Result<CandleModel> {
+    let _cache_dir = ensure_hf_home("REPOSCRY_CANDLE_CACHE_DIR")?;
+    match model_kind {
+        "nomic-v2-moe" | "nomic_v2_moe" | "nomic" => {
+            NomicV2MoeTextEmbedding::from_hf(repo_id, &Device::Cpu, DType::F32, max_length)
+                .map(CandleModel::NomicV2Moe)
+                .map_err(|error| anyhow!(error.to_string()))
+        }
+        "qwen3" | "qwen" => {
+            Qwen3TextEmbedding::from_hf(repo_id, &Device::Cpu, DType::F32, max_length)
+                .map(CandleModel::Qwen3)
+                .map_err(|error| anyhow!(error.to_string()))
+        }
+        other => Err(anyhow!(
+            "unsupported REPOSCRY_CANDLE_MODEL `{}`; supported values: qwen3, nomic-v2-moe",
+            other
+        )),
+    }
+}
+
+fn candle_embedding(model: &CandleModel, text: &str) -> Result<Vec<f32>> {
+    let embeddings = match model {
+        CandleModel::NomicV2Moe(model) => model
+            .embed(&[text])
+            .map_err(|error| anyhow!(error.to_string()))?,
+        CandleModel::Qwen3(model) => model
+            .embed(&[text])
+            .map_err(|error| anyhow!(error.to_string()))?,
+    };
+    embeddings
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("candle backend returned no embedding for input"))
+}
+
+fn ensure_hf_home(cache_env_var: &str) -> Result<PathBuf> {
+    let cache_dir: PathBuf = env::var(cache_env_var)
+        .or_else(|_| env::var("HF_HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(".reposcry")
+                .join("hf-home")
+        });
+    if env::var("HF_HOME").is_err() {
+        env::set_var("HF_HOME", &cache_dir);
+    }
+    std::fs::create_dir_all(&cache_dir)?;
+    Ok(cache_dir)
 }
 
 fn find_matching_nodes<'a>(graph: &'a CodeGraph, selector: &str) -> Vec<&'a GraphNode> {

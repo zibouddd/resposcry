@@ -19,6 +19,7 @@ function Measure-Millis([scriptblock]$Action) {
 
 $coldIndexMs = Measure-Millis { & $ReposcryBin --repo . index | Out-Null }
 $warmIndexMs = Measure-Millis { & $ReposcryBin --repo . index | Out-Null }
+$callWarmupMs = Measure-Millis { & $ReposcryBin --repo . warm-calls | Out-Null }
 $archMs = Measure-Millis { & $ReposcryBin --repo . get_architecture_overview --format json | Out-Null }
 $detectChangesMs = Measure-Millis { & $ReposcryBin --repo . detect_changes main HEAD --format json | Out-Null }
 $affectedFlowsMs = Measure-Millis { & $ReposcryBin --repo . get_affected_flows main HEAD --format json | Out-Null }
@@ -49,7 +50,7 @@ $payload = [ordered]@{
     metrics = [ordered]@{
         cold_index_ms = $coldIndexMs
         warm_index_ms = $warmIndexMs
-        call_warmup_ms = $null
+        call_warmup_ms = $callWarmupMs
         architecture_overview_ms = $archMs
         detect_changes_ms = $detectChangesMs
         affected_flows_ms = $affectedFlowsMs

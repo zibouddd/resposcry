@@ -12,7 +12,7 @@ Fixture definitions live in [benchmarks/fixtures.json](F:/CODING/2-PROJETS-EN-CO
 
 - cold index time
 - warm index time
-- call warmup time or `null` when call-edge persistence is folded into indexing
+- call warmup time measured with `reposcry warm-calls`
 - architecture overview latency
 - `detect_changes` latency
 - `get_affected_flows` latency

@@ -29,7 +29,7 @@ This file tracks reproducible RepoScry benchmark runs.
 
 ## Latest run
 
-- Captured at: `2026-05-23T13:47:00Z`
+- Captured at: `2026-05-23T13:50:32Z`
 - Commit: `9c1859e`
 - Fixture: `current_repo`
 - Machine:
@@ -38,24 +38,24 @@ This file tracks reproducible RepoScry benchmark runs.
   - Memory: `unknown in this restricted environment`
 - Repo size:
   - files indexed: `47`
-  - symbols indexed: `421`
+  - symbols indexed: `423`
   - imports indexed: `127`
-  - persisted call sites: `3665`
-  - persisted symbol call edges: `685`
+  - persisted call sites: `3680`
+  - persisted symbol call edges: `690`
   - persisted file call edges: `31`
   - total persisted file edges: `60`
 
 ### Timings
 
-- cold index: `6634 ms`
-- warm index: `6896 ms`
-- call warmup: `n/a` (call-edge persistence is part of `reposcry index`)
-- architecture overview: `225 ms`
-- `detect_changes`: `190 ms`
-- `get_affected_flows`: `164 ms`
-- `query_graph callers_of`: `54 ms`
-- `semantic_search_nodes`: `230 ms`
-- SQLite DB size: `1810432 bytes`
+- cold index: `10919 ms`
+- warm index: `8249 ms`
+- call warmup: `2517 ms`
+- architecture overview: `59 ms`
+- `detect_changes`: `152 ms`
+- `get_affected_flows`: `143 ms`
+- `query_graph callers_of`: `38 ms`
+- `semantic_search_nodes`: `233 ms`
+- SQLite DB size: `1908736 bytes`
 
 ### Raw artifact
 
