@@ -1,6 +1,6 @@
 # CRG-only command policy
 
-This package intentionally builds only the `crg` binary.
+This package intentionally builds only the `reposcry` binary.
 
 Removed:
 
@@ -11,9 +11,9 @@ Removed:
 Use:
 
 ```bash
-crg install
-crg install --platform codex
-crg vscode install
-crg cursor install
-crg context "your task" --strict --budget 20000
+reposcry install
+reposcry install --platform codex
+reposcry vscode install
+reposcry cursor install
+reposcry context "your task" --strict --budget 20000
 ```

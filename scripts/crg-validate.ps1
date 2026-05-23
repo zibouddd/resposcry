@@ -3,4 +3,4 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-crg validate $Base
+reposcry validate $Base

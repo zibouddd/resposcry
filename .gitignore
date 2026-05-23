@@ -1,5 +1,5 @@
 target/
-.code-review-graph/crg.db
+.code-review-graph/reposcry.db
 .code-review-graph/*.db
 .code-review-graph/*.sqlite
 .code-review-graph/AI_CONTEXT.md
@@ -11,7 +11,7 @@ target/
 
 # CRG:gitignore:BEGIN
 # CRG local cache and generated reports
-.code-review-graph/crg.db
+.code-review-graph/reposcry.db
 .code-review-graph/*.db
 .code-review-graph/*.sqlite
 .code-review-graph/AI_CONTEXT.md

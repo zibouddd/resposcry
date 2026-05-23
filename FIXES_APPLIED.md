@@ -11,7 +11,7 @@ This patched version focuses on making the dependency graph actually usable for 
 
 2. **Persist resolved import edges**
    - Added `edges` persistence helpers.
-   - `crg index` now resolves imports after scanning and stores `Imports` edges.
+   - `reposcry index` now resolves imports after scanning and stores `Imports` edges.
 
 3. **Rebuild graph correctly from SQLite**
    - `rebuild_graph` now rebuilds:
@@ -30,13 +30,13 @@ This patched version focuses on making the dependency graph actually usable for 
    - It fetches the file by path after the upsert.
 
 6. **Remove committed graph cache**
-   - Deleted `.code-review-graph/crg.db` from the repo.
+   - Deleted `.code-review-graph/reposcry.db` from the repo.
    - Added `.gitignore` rules for `.code-review-graph/` and local DB files.
 
 7. **Improve import resolution**
    - Relative TypeScript imports: `./x`, `../x`.
    - Alias imports: `@/x`, `~/x`.
-   - Rust workspace imports: `crg_graph::edge::EdgeKind` -> `crates/crg-graph/src/edge.rs`.
+   - Rust workspace imports: `crg_graph::edge::EdgeKind` -> `crates/reposcry-graph/src/edge.rs`.
    - Rust local imports: `crate::`, `self::`, `super::`.
 
 8. **Improve AI context pack quality**
@@ -52,7 +52,7 @@ I could not run `cargo test` in this sandbox because Rust/Cargo is not installed
 ```bash
 cargo fmt
 cargo test
-cargo run -p crg-cli -- init
-cargo run -p crg-cli -- index
-cargo run -p crg-cli -- stats
+cargo run -p reposcry-cli -- init
+cargo run -p reposcry-cli -- index
+cargo run -p reposcry-cli -- stats
 ```
