@@ -74,6 +74,18 @@ pub struct CachedSearchHit {
     pub match_reason: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedSearchVector {
+    pub node_id: i64,
+    pub file_path: String,
+    pub kind: String,
+    pub name: String,
+    pub signature: Option<String>,
+    pub backend: String,
+    pub dims: u32,
+    pub vector: Vec<f32>,
+}
+
 pub struct CacheDb {
     conn: Connection,
 }
@@ -175,6 +187,17 @@ impl CacheDb {
                 doc_comment,
                 imports,
                 content
+            );
+            CREATE TABLE IF NOT EXISTS search_vectors (
+                node_id INTEGER NOT NULL,
+                file_path TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                name TEXT NOT NULL,
+                signature TEXT,
+                backend TEXT NOT NULL,
+                dims INTEGER NOT NULL,
+                vector BLOB NOT NULL,
+                PRIMARY KEY (node_id, backend)
             );
             CREATE TABLE IF NOT EXISTS git_changes (
                 id INTEGER PRIMARY KEY,
@@ -315,8 +338,10 @@ impl CacheDb {
     }
 
     pub fn insert_call_sites(&self, file_id: i64, call_sites: &[CallSite]) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM call_sites WHERE file_id = ?1", params![file_id])?;
+        self.conn.execute(
+            "DELETE FROM call_sites WHERE file_id = ?1",
+            params![file_id],
+        )?;
         for call_site in call_sites {
             self.conn.execute(
                 "INSERT INTO call_sites (file_id, caller, callee, line, confidence, resolution_strategy) \
@@ -447,15 +472,28 @@ impl CacheDb {
     }
 
     pub fn clear_symbol_edges_by_kind(&self, kind: &str) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM symbol_edges WHERE kind = ?1",
-            params![kind],
-        )?;
+        self.conn
+            .execute("DELETE FROM symbol_edges WHERE kind = ?1", params![kind])?;
         Ok(())
     }
 
     pub fn clear_search_index(&self) -> Result<()> {
         self.conn.execute("DELETE FROM search_index", [])?;
+        Ok(())
+    }
+
+    pub fn clear_search_vectors(&self, backend: Option<&str>) -> Result<()> {
+        match backend {
+            Some(backend) => {
+                self.conn.execute(
+                    "DELETE FROM search_vectors WHERE backend = ?1",
+                    params![backend],
+                )?;
+            }
+            None => {
+                self.conn.execute("DELETE FROM search_vectors", [])?;
+            }
+        }
         Ok(())
     }
 
@@ -570,6 +608,38 @@ impl CacheDb {
         Ok(())
     }
 
+    pub fn insert_search_vector(
+        &self,
+        node_id: i64,
+        file_path: &str,
+        kind: &str,
+        name: &str,
+        signature: Option<&str>,
+        backend: &str,
+        vector: &[f32],
+    ) -> Result<()> {
+        let mut bytes = Vec::with_capacity(vector.len() * std::mem::size_of::<f32>());
+        for value in vector {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        self.conn.execute(
+            "INSERT OR REPLACE INTO search_vectors \
+             (node_id, file_path, kind, name, signature, backend, dims, vector) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                node_id,
+                file_path,
+                kind,
+                name,
+                signature,
+                backend,
+                i64::try_from(vector.len()).unwrap_or(0),
+                bytes,
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn search_nodes_fts(
         &self,
         query: &str,
@@ -621,6 +691,46 @@ impl CacheDb {
             rows.collect::<std::result::Result<Vec<_>, _>>()?
         };
         Ok(hits)
+    }
+
+    pub fn get_search_vectors(
+        &self,
+        backend: &str,
+        kind: Option<&str>,
+    ) -> Result<Vec<CachedSearchVector>> {
+        let query = match kind {
+            Some(_) => {
+                "SELECT node_id, file_path, kind, name, signature, backend, dims, vector \
+                 FROM search_vectors WHERE backend = ?1 AND kind = ?2"
+            }
+            None => {
+                "SELECT node_id, file_path, kind, name, signature, backend, dims, vector \
+                 FROM search_vectors WHERE backend = ?1"
+            }
+        };
+        let mut stmt = self.conn.prepare(query)?;
+        let map_row = |row: &rusqlite::Row<'_>| {
+            let blob: Vec<u8> = row.get(7)?;
+            let mut vector = Vec::with_capacity(blob.len() / 4);
+            for chunk in blob.chunks_exact(4) {
+                vector.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+            }
+            Ok(CachedSearchVector {
+                node_id: row.get(0)?,
+                file_path: row.get(1)?,
+                kind: row.get(2)?,
+                name: row.get(3)?,
+                signature: row.get(4)?,
+                backend: row.get(5)?,
+                dims: row.get::<_, i64>(6)? as u32,
+                vector,
+            })
+        };
+        let rows = match kind {
+            Some(kind) => stmt.query_map(params![backend, kind], map_row)?,
+            None => stmt.query_map(params![backend], map_row)?,
+        };
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
     pub fn set_config(&self, key: &str, value: &str) -> Result<()> {

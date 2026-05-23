@@ -1,0 +1,39 @@
+{
+  "fixtures": [
+    {
+      "name": "current_repo",
+      "kind": "local",
+      "path": ".",
+      "size": "small_rust_workspace",
+      "notes": "Primary smoke and regression fixture committed with the repository."
+    },
+    {
+      "name": "small_rust_repo",
+      "kind": "external",
+      "path": null,
+      "size": "small",
+      "notes": "Provision a compact Rust application or library to compare index and query overhead on a minimal codebase."
+    },
+    {
+      "name": "medium_nextjs_repo",
+      "kind": "external",
+      "path": null,
+      "size": "medium",
+      "notes": "Provision a Next.js repository with API routes, layouts, and server actions to exercise flow detection."
+    },
+    {
+      "name": "mixed_monorepo",
+      "kind": "external",
+      "path": null,
+      "size": "mixed",
+      "notes": "Provision a multi-package repository with Rust and TypeScript components to track cross-language behavior."
+    },
+    {
+      "name": "large_repo",
+      "kind": "external",
+      "path": null,
+      "size": "large",
+      "notes": "Provision a substantially larger repository to observe scaling and database growth."
+    }
+  ]
+}

@@ -83,7 +83,9 @@ fn main() -> Result<()> {
             symbols: db.symbol_count()?,
             imports: db.import_count()?,
             edges: db.edge_count()?,
-            preset: cli.preset.or_else(|| db.get_config("preset").ok().flatten()),
+            preset: cli
+                .preset
+                .or_else(|| db.get_config("preset").ok().flatten()),
         },
     };
 
@@ -119,6 +121,9 @@ mod tests {
 
     #[test]
     fn cache_db_path_constants_are_stable() {
-        assert_eq!(Path::new(CACHE_DIR).join(CACHE_DB), PathBuf::from(".reposcry").join("reposcry.db"));
+        assert_eq!(
+            Path::new(CACHE_DIR).join(CACHE_DB),
+            PathBuf::from(".reposcry").join("reposcry.db")
+        );
     }
 }

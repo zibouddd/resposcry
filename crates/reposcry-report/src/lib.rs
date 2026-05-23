@@ -106,10 +106,7 @@ pub fn generate_report(
         if rdeps > 5 {
             high_risk.push(RiskItem {
                 file: path.clone(),
-                reason: format!(
-                    "high fan-in ({} dependents), changed",
-                    rdeps
-                ),
+                reason: format!("high fan-in ({} dependents), changed", rdeps),
             });
         }
     }
@@ -167,9 +164,7 @@ pub fn render_markdown(report: &ReviewReport) -> String {
         report.summary.risk
     ));
     if !report.high_risk_changes.is_empty() {
-        md.push_str(
-            "## High-risk changes\n\n| File | Reason |\n|---|---|\n",
-        );
+        md.push_str("## High-risk changes\n\n| File | Reason |\n|---|---|\n");
         for item in &report.high_risk_changes {
             md.push_str(&format!("| {} | {} |\n", item.file, item.reason));
         }

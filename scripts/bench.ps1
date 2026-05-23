@@ -9,7 +9,6 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 cargo build -p reposcry-cli --bins | Out-Null
 $ReposcryBin = if ($env:REPOSCRY_BIN) { $env:REPOSCRY_BIN } else { Join-Path $Root "target/debug/reposcry.exe" }
-$CrgBin = if ($env:CRG_BIN) { $env:CRG_BIN } else { Join-Path $Root "target/debug/reposcry-crg.exe" }
 
 function Measure-Millis([scriptblock]$Action) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -20,11 +19,13 @@ function Measure-Millis([scriptblock]$Action) {
 
 $coldIndexMs = Measure-Millis { & $ReposcryBin --repo . index | Out-Null }
 $warmIndexMs = Measure-Millis { & $ReposcryBin --repo . index | Out-Null }
-$archMs = Measure-Millis { & $CrgBin --repo . get_architecture_overview --format json | Out-Null }
-$callersMs = Measure-Millis { & $CrgBin --repo . query_graph "callers_of rebuild_graph" | Out-Null }
-$searchMs = Measure-Millis { & $CrgBin --repo . semantic_search_nodes "cache database calls" --limit 20 | Out-Null }
+$archMs = Measure-Millis { & $ReposcryBin --repo . get_architecture_overview --format json | Out-Null }
+$detectChangesMs = Measure-Millis { & $ReposcryBin --repo . detect_changes main HEAD --format json | Out-Null }
+$affectedFlowsMs = Measure-Millis { & $ReposcryBin --repo . get_affected_flows main HEAD --format json | Out-Null }
+$callersMs = Measure-Millis { & $ReposcryBin --repo . query_graph "callers_of rebuild_graph" | Out-Null }
+$searchMs = Measure-Millis { & $ReposcryBin --repo . semantic_search_nodes "cache database calls" --limit 20 --semantic | Out-Null }
 
-$archJson = & $CrgBin --repo . get_architecture_overview --format json
+$archJson = & $ReposcryBin --repo . get_architecture_overview --format json
 $arch = $archJson | ConvertFrom-Json
 $osLine = ((cmd /c ver) | Where-Object { $_.Trim() -ne "" } | Select-Object -Last 1).Trim()
 
@@ -43,11 +44,15 @@ $payload = [ordered]@{
     repo = [ordered]@{
         path = $Root.Path
         fixture = "current_repo"
+        fixture_manifest = "benchmarks/fixtures.json"
     }
     metrics = [ordered]@{
         cold_index_ms = $coldIndexMs
         warm_index_ms = $warmIndexMs
+        call_warmup_ms = $null
         architecture_overview_ms = $archMs
+        detect_changes_ms = $detectChangesMs
+        affected_flows_ms = $affectedFlowsMs
         query_graph_callers_ms = $callersMs
         semantic_search_ms = $searchMs
         db_size_bytes = $dbSize
@@ -57,6 +62,7 @@ $payload = [ordered]@{
         persisted_call_sites = $arch.persisted_call_sites
         persisted_symbol_call_edges = $arch.persisted_symbol_call_edges
         persisted_file_call_edges = $arch.persisted_file_call_edges
+        total_edges = $arch.resolved_import_edges
     }
 }
 

@@ -145,11 +145,12 @@ impl ContextBuilder {
         matched_files.sort_by(|a, b| {
             let a_score = score_relevance(&a.path, &a.path, &keywords);
             let b_score = score_relevance(&b.path, &b.path, &keywords);
-            b_score.partial_cmp(&a_score).unwrap_or(std::cmp::Ordering::Equal)
+            b_score
+                .partial_cmp(&a_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
         matched_files.dedup_by(|a, b| a.path == b.path);
-        let max_by_budget = (self.config.token_budget / 750)
-            .clamp(4, self.config.max_files);
+        let max_by_budget = (self.config.token_budget / 750).clamp(4, self.config.max_files);
         matched_files.truncate(max_by_budget as usize);
 
         // Step 2-3: Find dependency paths and reverse deps
@@ -188,14 +189,10 @@ impl ContextBuilder {
                 strict_warnings.push("No dependency paths found.".into());
             }
             if reverse_dependencies.is_empty() {
-                strict_warnings.push(
-                    "No reverse dependency check performed.".into(),
-                );
+                strict_warnings.push("No reverse dependency check performed.".into());
             }
             if suggested_tests.is_empty() {
-                strict_warnings.push(
-                    "No test candidates found. Consider adding tests.".into(),
-                );
+                strict_warnings.push("No test candidates found. Consider adding tests.".into());
             }
             if confidence == Confidence::Low {
                 strict_warnings.push(format!(
@@ -315,9 +312,7 @@ impl ContextBuilder {
             .values()
             .filter(|n| {
                 n.kind == NodeKind::Test
-                    && n.file_path
-                        .as_deref()
-                        .map_or(false, |p| p.contains("test"))
+                    && n.file_path.as_deref().map_or(false, |p| p.contains("test"))
             })
             .filter_map(|n| n.file_path.clone())
             .collect();
@@ -451,15 +446,74 @@ impl ContextBuilder {
 
 fn extract_keywords(task: &str) -> Vec<String> {
     let stop_words = [
-        "the", "a", "an", "is", "are", "was", "were", "be", "been",
-        "being", "have", "has", "had", "do", "does", "did", "will",
-        "would", "could", "should", "may", "might", "shall", "can",
-        "fix", "add", "change", "update", "remove", "implement",
-        "make", "get", "set", "this", "that", "these", "those",
-        "to", "of", "in", "for", "on", "with", "at", "by", "from",
-        "as", "into", "about", "after", "before", "between", "under",
-        "and", "but", "or", "nor", "not", "so", "yet", "no",
-        "bug", "feature", "issue", "task", "when", "no", "not",
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "fix",
+        "add",
+        "change",
+        "update",
+        "remove",
+        "implement",
+        "make",
+        "get",
+        "set",
+        "this",
+        "that",
+        "these",
+        "those",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "about",
+        "after",
+        "before",
+        "between",
+        "under",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "not",
+        "so",
+        "yet",
+        "no",
+        "bug",
+        "feature",
+        "issue",
+        "task",
+        "when",
+        "no",
+        "not",
     ];
     task.split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.len() > 2)

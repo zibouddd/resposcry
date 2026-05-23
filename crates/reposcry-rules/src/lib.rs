@@ -57,9 +57,7 @@ impl RulesConfig {
             rules: vec![
                 Rule {
                     name: "no-ui-to-db".into(),
-                    description: Some(
-                        "UI must not import database code directly.".into(),
-                    ),
+                    description: Some("UI must not import database code directly.".into()),
                     from: Some("src/components/**".into()),
                     to: Some("src/server/db/**".into()),
                     path: None,
@@ -68,9 +66,7 @@ impl RulesConfig {
                 },
                 Rule {
                     name: "no-api-to-ui".into(),
-                    description: Some(
-                        "API routes must not import UI components.".into(),
-                    ),
+                    description: Some("API routes must not import UI components.".into()),
                     from: Some("src/app/api/**".into()),
                     to: Some("src/components/**".into()),
                     path: None,
@@ -79,9 +75,7 @@ impl RulesConfig {
                 },
                 Rule {
                     name: "no-large-files".into(),
-                    description: Some(
-                        "Files should be under 800 lines.".into(),
-                    ),
+                    description: Some("Files should be under 800 lines.".into()),
                     from: None,
                     to: None,
                     path: None,
@@ -90,9 +84,7 @@ impl RulesConfig {
                 },
                 Rule {
                     name: "no-cycles".into(),
-                    description: Some(
-                        "No dependency cycles allowed.".into(),
-                    ),
+                    description: Some("No dependency cycles allowed.".into()),
                     from: None,
                     to: None,
                     path: None,
@@ -101,9 +93,7 @@ impl RulesConfig {
                 },
                 Rule {
                     name: "no-build-artifacts".into(),
-                    description: Some(
-                        "Build artifacts should not be committed.".into(),
-                    ),
+                    description: Some("Build artifacts should not be committed.".into()),
                     from: None,
                     to: None,
                     path: Some("target/**".into()),
@@ -158,9 +148,7 @@ impl RulesEngine {
                 }
                 _ => {
                     // Pattern-based rules checked during import resolution
-                    if let (Some(from_pattern), Some(to_pattern)) =
-                        (&rule.from, &rule.to)
-                    {
+                    if let (Some(from_pattern), Some(to_pattern)) = (&rule.from, &rule.to) {
                         let from_set = build_globset(from_pattern);
                         let to_set = build_globset(to_pattern);
                         if let (Some(from_set), Some(to_set)) = (from_set, to_set) {
@@ -171,13 +159,9 @@ impl RulesEngine {
                                 let source = graph.get_node(edge.source_id);
                                 let target = graph.get_node(edge.target_id);
                                 if let (Some(src), Some(tgt)) = (source, target) {
-                                    let src_path =
-                                        src.file_path.as_deref().unwrap_or("");
-                                    let tgt_path =
-                                        tgt.file_path.as_deref().unwrap_or("");
-                                    if from_set.is_match(src_path)
-                                        && to_set.is_match(tgt_path)
-                                    {
+                                    let src_path = src.file_path.as_deref().unwrap_or("");
+                                    let tgt_path = tgt.file_path.as_deref().unwrap_or("");
+                                    if from_set.is_match(src_path) && to_set.is_match(tgt_path) {
                                         violations.push(RuleViolation {
                                             rule: rule.name.clone(),
                                             severity: rule.severity.clone(),
@@ -185,12 +169,8 @@ impl RulesEngine {
                                                 "{} imports {} (violates {} rule)",
                                                 src_path, tgt_path, rule.name
                                             ),
-                                            source_path: Some(
-                                                src_path.to_string(),
-                                            ),
-                                            target_path: Some(
-                                                tgt_path.to_string(),
-                                            ),
+                                            source_path: Some(src_path.to_string()),
+                                            target_path: Some(tgt_path.to_string()),
                                         });
                                     }
                                 }
@@ -257,10 +237,7 @@ fn build_globset(pattern: &str) -> Option<GlobSet> {
             match builder.build() {
                 Ok(set) => Some(set),
                 Err(e) => {
-                    warn!(
-                        "Failed to build glob set for '{}': {}",
-                        pattern, e
-                    );
+                    warn!("Failed to build glob set for '{}': {}", pattern, e);
                     None
                 }
             }

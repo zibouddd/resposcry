@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::env;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -15,9 +17,16 @@ use serde_json::{json, Value};
 
 const CACHE_DIR: &str = ".reposcry";
 const CACHE_DB: &str = "reposcry.db";
+const LOCAL_SEMANTIC_BACKEND: &str = "local-hash-v1";
+const LOCAL_SEMANTIC_DIMS: usize = 64;
+const OLLAMA_BACKEND: &str = "ollama";
 
 #[derive(Parser)]
-#[command(name = "reposcry-crg", version, about = "CRG-compatible analysis commands for RepoScry")]
+#[command(
+    name = "reposcry-crg",
+    version,
+    about = "CRG-compatible analysis commands for RepoScry"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -27,7 +36,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-enum Commands {
+pub enum Commands {
     /// Reviewing code changes — gives risk-scored analysis.
     #[command(name = "detect_changes", visible_alias = "detect-changes")]
     DetectChanges {
@@ -76,18 +85,28 @@ enum Commands {
         format: String,
     },
     /// Finding functions/classes/files by name, path, signature, or keyword.
-    #[command(name = "semantic_search_nodes", visible_alias = "semantic-search-nodes")]
+    #[command(
+        name = "semantic_search_nodes",
+        visible_alias = "semantic-search-nodes"
+    )]
     SemanticSearchNodes {
         query: String,
         #[arg(long)]
         kind: Option<String>,
         #[arg(long, default_value = "20")]
         limit: usize,
+        #[arg(long, default_value_t = false)]
+        semantic: bool,
+        #[arg(long)]
+        semantic_backend: Option<String>,
         #[arg(long, default_value = "json")]
         format: String,
     },
     /// Understanding high-level codebase structure.
-    #[command(name = "get_architecture_overview", visible_alias = "get-architecture-overview")]
+    #[command(
+        name = "get_architecture_overview",
+        visible_alias = "get-architecture-overview"
+    )]
     GetArchitectureOverview {
         #[arg(long, default_value = "json")]
         format: String,
@@ -216,27 +235,62 @@ fn main() -> Result<()> {
     let repo_root = PathBuf::from(&cli.repo_root).canonicalize()?;
     let db_path = repo_root.join(CACHE_DIR).join(CACHE_DB);
 
-    match cli.command {
+    run_command(&repo_root, &db_path, cli.command)
+}
+
+pub fn run_command(repo_root: &Path, db_path: &Path, command: Commands) -> Result<()> {
+    match command {
         Commands::DetectChanges { base, head, format } => {
             detect_changes(&repo_root, &db_path, &base, &head, &format)
         }
-        Commands::GetReviewContext { task, budget, strict, format } => {
-            review_context(&repo_root, &db_path, &task, budget, strict, &format)
-        }
-        Commands::GetImpactRadius { target, depth, format } => {
-            impact_radius(&db_path, &target, depth, &format)
-        }
+        Commands::GetReviewContext {
+            task,
+            budget,
+            strict,
+            format,
+        } => review_context(&repo_root, &db_path, &task, budget, strict, &format),
+        Commands::GetImpactRadius {
+            target,
+            depth,
+            format,
+        } => impact_radius(&db_path, &target, depth, &format),
         Commands::GetAffectedFlows { base, head, format } => {
             affected_flows(&repo_root, &db_path, &base, &head, &format)
         }
-        Commands::QueryGraph { query, no_runtime_calls: _, format } => query_graph(&db_path, &query, &format),
-        Commands::SemanticSearchNodes { query, kind, limit, format } => {
-            semantic_search(&db_path, &query, kind.as_deref(), limit, &format)
-        }
+        Commands::QueryGraph {
+            query,
+            no_runtime_calls: _,
+            format,
+        } => query_graph(&db_path, &query, &format),
+        Commands::SemanticSearchNodes {
+            query,
+            kind,
+            limit,
+            semantic,
+            semantic_backend,
+            format,
+        } => semantic_search(
+            &db_path,
+            &query,
+            kind.as_deref(),
+            limit,
+            semantic,
+            semantic_backend.as_deref(),
+            &format,
+        ),
         Commands::GetArchitectureOverview { format } => architecture_overview(&db_path, &format),
-        Commands::RefactorTool { action, target, replacement, format } => {
-            refactor_tool(&db_path, &action, target.as_deref(), replacement.as_deref(), &format)
-        }
+        Commands::RefactorTool {
+            action,
+            target,
+            replacement,
+            format,
+        } => refactor_tool(
+            &db_path,
+            &action,
+            target.as_deref(),
+            replacement.as_deref(),
+            &format,
+        ),
         Commands::Mcp { max_request_bytes } => run_mcp(&repo_root, &db_path, max_request_bytes),
     }
 }
@@ -258,7 +312,12 @@ fn run_mcp(repo_root: &Path, db_path: &Path, max_request_bytes: usize) -> Result
     Ok(())
 }
 
-fn process_mcp_line(repo_root: &Path, db_path: &Path, line: &str, max_request_bytes: usize) -> Option<Value> {
+fn process_mcp_line(
+    repo_root: &Path,
+    db_path: &Path,
+    line: &str,
+    max_request_bytes: usize,
+) -> Option<Value> {
     if line.len() > max_request_bytes {
         return Some(mcp_error_value(
             None,
@@ -272,7 +331,12 @@ fn process_mcp_line(repo_root: &Path, db_path: &Path, line: &str, max_request_by
         Ok(value) => value,
         Err(error) => {
             mcp_log(&format!("invalid JSON request: {}", error));
-            return Some(mcp_error_value(None, -32700, "parse error", Some(json!({ "details": error.to_string() }))));
+            return Some(mcp_error_value(
+                None,
+                -32700,
+                "parse error",
+                Some(json!({ "details": error.to_string() })),
+            ));
         }
     };
 
@@ -302,7 +366,7 @@ fn process_mcp_request(repo_root: &Path, db_path: &Path, request: Value) -> Opti
                     }
                 },
                 "serverInfo": {
-                    "name": "reposcry-crg",
+                    "name": "reposcry",
                     "version": env!("CARGO_PKG_VERSION")
                 }
             }),
@@ -373,7 +437,7 @@ fn mcp_error_value(id: Option<Value>, code: i64, message: &str, data: Option<Val
 }
 
 fn mcp_log(message: &str) {
-    let _ = writeln!(io::stderr().lock(), "reposcry-crg mcp: {}", message);
+    let _ = writeln!(io::stderr().lock(), "reposcry mcp: {}", message);
 }
 
 fn mcp_tools() -> Vec<ToolCallSpec> {
@@ -446,7 +510,9 @@ fn mcp_tools() -> Vec<ToolCallSpec> {
                 "properties": {
                     "query": {"type": "string"},
                     "kind": {"type": "string"},
-                    "limit": {"type": "integer"}
+                    "limit": {"type": "integer"},
+                    "semantic": {"type": "boolean"},
+                    "semantic_backend": {"type": "string"}
                 },
                 "required": ["query"]
             }),
@@ -479,7 +545,10 @@ fn mcp_tool_call(repo_root: &Path, db_path: &Path, params: &Value) -> Result<Val
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("missing tool name"))?;
-    let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let args = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
 
     match name {
         "detect_changes" => detect_changes_value(
@@ -512,6 +581,8 @@ fn mcp_tool_call(repo_root: &Path, db_path: &Path, params: &Value) -> Result<Val
             required_string(&args, "query")?,
             args.get("kind").and_then(Value::as_str),
             optional_usize(&args, "limit").unwrap_or(20),
+            optional_bool(&args, "semantic").unwrap_or(false),
+            args.get("semantic_backend").and_then(Value::as_str),
         ),
         "get_architecture_overview" => architecture_overview_value(db_path),
         "refactor_tool" => refactor_tool_value(
@@ -537,18 +608,30 @@ fn optional_string<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 fn optional_u32(value: &Value, key: &str) -> Option<u32> {
-    value.get(key).and_then(Value::as_u64).and_then(|v| u32::try_from(v).ok())
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|v| u32::try_from(v).ok())
 }
 
 fn optional_usize(value: &Value, key: &str) -> Option<usize> {
-    value.get(key).and_then(Value::as_u64).and_then(|v| usize::try_from(v).ok())
+    value
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok())
 }
 
 fn optional_bool(value: &Value, key: &str) -> Option<bool> {
     value.get(key).and_then(Value::as_bool)
 }
 
-fn detect_changes(repo_root: &Path, db_path: &Path, base: &str, head: &str, format: &str) -> Result<()> {
+fn detect_changes(
+    repo_root: &Path,
+    db_path: &Path,
+    base: &str,
+    head: &str,
+    format: &str,
+) -> Result<()> {
     let output = detect_changes_value(repo_root, db_path, base, head)?;
     print_output(&output, format, render_detect_markdown(&output))
 }
@@ -591,12 +674,29 @@ fn detect_changes_value(repo_root: &Path, db_path: &Path, base: &str, head: &str
     }))
 }
 
-fn review_context(repo_root: &Path, db_path: &Path, task: &str, budget: u32, strict: bool, format: &str) -> Result<()> {
+fn review_context(
+    repo_root: &Path,
+    db_path: &Path,
+    task: &str,
+    budget: u32,
+    strict: bool,
+    format: &str,
+) -> Result<()> {
     let output = review_context_value(repo_root, db_path, task, budget, strict)?;
-    print_output(&output, format, render_simple_markdown("Review context", &output))
+    print_output(
+        &output,
+        format,
+        render_simple_markdown("Review context", &output),
+    )
 }
 
-fn review_context_value(repo_root: &Path, db_path: &Path, task: &str, budget: u32, strict: bool) -> Result<Value> {
+fn review_context_value(
+    repo_root: &Path,
+    db_path: &Path,
+    task: &str,
+    budget: u32,
+    strict: bool,
+) -> Result<Value> {
     let db = CacheDb::open(db_path)?;
     let graph = rebuild_graph(&db)?;
     let git = GitIntegration::new(repo_root);
@@ -621,15 +721,25 @@ fn review_context_value(repo_root: &Path, db_path: &Path, task: &str, budget: u3
 
 fn impact_radius(db_path: &Path, target: &str, depth: usize, format: &str) -> Result<()> {
     let output = impact_radius_value(db_path, target, depth)?;
-    print_output(&output, format, render_simple_markdown("Impact radius", &output))
+    print_output(
+        &output,
+        format,
+        render_simple_markdown("Impact radius", &output),
+    )
 }
 
 fn impact_radius_value(db_path: &Path, target: &str, depth: usize) -> Result<Value> {
     let db = CacheDb::open(db_path)?;
     let graph = rebuild_graph(&db)?;
     let starts = find_matching_nodes(&graph, target);
-    let start_nodes = starts.iter().map(|n| NodeSummary::from(*n)).collect::<Vec<_>>();
-    let start_paths = starts.iter().filter_map(|n| n.file_path.clone()).collect::<Vec<_>>();
+    let start_nodes = starts
+        .iter()
+        .map(|n| NodeSummary::from(*n))
+        .collect::<Vec<_>>();
+    let start_paths = starts
+        .iter()
+        .filter_map(|n| n.file_path.clone())
+        .collect::<Vec<_>>();
     let impacted = walk_reverse_imports(&graph, &start_paths, depth);
     let tests = suggested_tests_for_selector(&graph, target, 20);
     Ok(json!({
@@ -643,9 +753,19 @@ fn impact_radius_value(db_path: &Path, target: &str, depth: usize) -> Result<Val
     }))
 }
 
-fn affected_flows(repo_root: &Path, db_path: &Path, base: &str, head: &str, format: &str) -> Result<()> {
+fn affected_flows(
+    repo_root: &Path,
+    db_path: &Path,
+    base: &str,
+    head: &str,
+    format: &str,
+) -> Result<()> {
     let output = affected_flows_value(repo_root, db_path, base, head)?;
-    print_output(&output, format, render_simple_markdown("Affected flows", &output))
+    print_output(
+        &output,
+        format,
+        render_simple_markdown("Affected flows", &output),
+    )
 }
 
 fn affected_flows_value(repo_root: &Path, db_path: &Path, base: &str, head: &str) -> Result<Value> {
@@ -668,7 +788,11 @@ fn affected_flows_value(repo_root: &Path, db_path: &Path, base: &str, head: &str
 
 fn query_graph(db_path: &Path, query: &str, format: &str) -> Result<()> {
     let output = query_graph_value(db_path, query)?;
-    print_output(&output, format, render_simple_markdown("Graph query", &output))
+    print_output(
+        &output,
+        format,
+        render_simple_markdown("Graph query", &output),
+    )
 }
 
 fn query_graph_value(db_path: &Path, query: &str) -> Result<Value> {
@@ -693,15 +817,34 @@ fn query_graph_value(db_path: &Path, query: &str) -> Result<Value> {
     }))
 }
 
-fn semantic_search(db_path: &Path, query: &str, kind: Option<&str>, limit: usize, format: &str) -> Result<()> {
-    let output = semantic_search_value(db_path, query, kind, limit)?;
-    print_output(&output, format, render_simple_markdown("Semantic search", &output))
+fn semantic_search(
+    db_path: &Path,
+    query: &str,
+    kind: Option<&str>,
+    limit: usize,
+    semantic: bool,
+    semantic_backend: Option<&str>,
+    format: &str,
+) -> Result<()> {
+    let output = semantic_search_value(db_path, query, kind, limit, semantic, semantic_backend)?;
+    print_output(
+        &output,
+        format,
+        render_simple_markdown("Semantic search", &output),
+    )
 }
 
-fn semantic_search_value(db_path: &Path, query: &str, kind: Option<&str>, limit: usize) -> Result<Value> {
+fn semantic_search_value(
+    db_path: &Path,
+    query: &str,
+    kind: Option<&str>,
+    limit: usize,
+    semantic: bool,
+    semantic_backend: Option<&str>,
+) -> Result<Value> {
     let db = CacheDb::open(db_path)?;
     let graph = rebuild_graph(&db)?;
-    let hits = match db.search_nodes_fts(query, kind, limit) {
+    let base_hits = match db.search_nodes_fts(query, kind, limit) {
         Ok(fts_hits) if !fts_hits.is_empty() => fts_hits
             .into_iter()
             .map(|hit| SearchHit {
@@ -719,10 +862,26 @@ fn semantic_search_value(db_path: &Path, query: &str, kind: Option<&str>, limit:
             .collect(),
         _ => search_nodes(&graph, query, kind, limit),
     };
+    let resolved_backend = resolved_semantic_backend(&db, semantic_backend);
+    let hits = if semantic {
+        hybrid_search_nodes(
+            &db,
+            &graph,
+            query,
+            kind,
+            limit,
+            base_hits,
+            &resolved_backend,
+        )?
+    } else {
+        base_hits
+    };
     Ok(json!({
         "tool": "semantic_search_nodes",
         "query": query,
         "kind": kind,
+        "semantic": semantic,
+        "semantic_backend": resolved_backend,
         "hits": hits,
     }))
 }
@@ -765,10 +924,23 @@ fn architecture_overview_value(db_path: &Path) -> Result<Value> {
     }))
 }
 
-fn refactor_tool(db_path: &Path, action: &str, target: Option<&str>, replacement: Option<&str>, format: &str) -> Result<()> {
-    let repo_root = db_path.parent().and_then(Path::parent).ok_or_else(|| anyhow!("could not infer repo root from db path"))?;
+fn refactor_tool(
+    db_path: &Path,
+    action: &str,
+    target: Option<&str>,
+    replacement: Option<&str>,
+    format: &str,
+) -> Result<()> {
+    let repo_root = db_path
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| anyhow!("could not infer repo root from db path"))?;
     let output = refactor_tool_value(repo_root, db_path, action, target, replacement)?;
-    print_output(&output, format, render_simple_markdown("Refactor plan", &output))
+    print_output(
+        &output,
+        format,
+        render_simple_markdown("Refactor plan", &output),
+    )
 }
 
 fn refactor_tool_value(
@@ -798,8 +970,14 @@ fn refactor_tool_value(
         "rename" => {
             let target = target.ok_or_else(|| anyhow!("rename requires a target"))?;
             let matches = find_matching_nodes(&graph, target);
-            let match_summaries = matches.iter().map(|node| NodeSummary::from(*node)).collect::<Vec<_>>();
-            let start_paths = match_summaries.iter().filter_map(|n| n.file_path.clone()).collect::<Vec<_>>();
+            let match_summaries = matches
+                .iter()
+                .map(|node| NodeSummary::from(*node))
+                .collect::<Vec<_>>();
+            let start_paths = match_summaries
+                .iter()
+                .filter_map(|n| n.file_path.clone())
+                .collect::<Vec<_>>();
             Ok(json!({
                 "tool": "refactor_tool",
                 "action": "rename",
@@ -839,18 +1017,28 @@ fn refactor_tool_value(
             let head = replacement.unwrap_or("HEAD");
             let git = GitIntegration::new(repo_root);
             let changes = git.diff_files(base, head)?;
-            let changed_paths = changes.iter().map(|change| change.path.clone()).collect::<HashSet<_>>();
+            let changed_paths = changes
+                .iter()
+                .map(|change| change.path.clone())
+                .collect::<HashSet<_>>();
             let public_symbols = graph
                 .nodes
                 .values()
                 .filter(|node| node.kind != NodeKind::File)
-                .filter(|node| node.file_path.as_ref().map(|path| changed_paths.contains(path)).unwrap_or(false))
+                .filter(|node| {
+                    node.file_path
+                        .as_ref()
+                        .map(|path| changed_paths.contains(path))
+                        .unwrap_or(false)
+                })
                 .filter(|node| is_public_api_node(node))
-                .map(|node| json!({
-                    "symbol": NodeSummary::from(node),
-                    "references": incoming_reference_count(&graph, node.id),
-                    "impacted_tests": suggested_tests_for_selector(&graph, &node.name, 10),
-                }))
+                .map(|node| {
+                    json!({
+                        "symbol": NodeSummary::from(node),
+                        "references": incoming_reference_count(&graph, node.id),
+                        "impacted_tests": suggested_tests_for_selector(&graph, &node.name, 10),
+                    })
+                })
                 .collect::<Vec<_>>();
             Ok(json!({
                 "tool": "refactor_tool",
@@ -882,7 +1070,9 @@ fn rebuild_graph(db: &CacheDb) -> Result<CodeGraph> {
     }
 
     for file in &files {
-        let Some(&graph_file_id) = db_file_to_graph_node.get(&file.id) else { continue };
+        let Some(&graph_file_id) = db_file_to_graph_node.get(&file.id) else {
+            continue;
+        };
         for sym in db.get_symbols_by_file(file.id)? {
             let sym_id = graph.add_node(symbol_kind(&sym.kind), &sym.name);
             if let Some(node) = graph.nodes.get_mut(&sym_id) {
@@ -901,26 +1091,49 @@ fn rebuild_graph(db: &CacheDb) -> Result<CodeGraph> {
     }
 
     for edge in db.get_edges_by_kind(EdgeKind::Imports)? {
-        let Some(&source_graph_id) = db_file_to_graph_node.get(&edge.source_file_id) else { continue };
-        let Some(target_file_id) = edge.target_file_id else { continue };
-        let Some(&target_graph_id) = db_file_to_graph_node.get(&target_file_id) else { continue };
+        let Some(&source_graph_id) = db_file_to_graph_node.get(&edge.source_file_id) else {
+            continue;
+        };
+        let Some(target_file_id) = edge.target_file_id else {
+            continue;
+        };
+        let Some(&target_graph_id) = db_file_to_graph_node.get(&target_file_id) else {
+            continue;
+        };
         graph.add_edge(source_graph_id, target_graph_id, EdgeKind::Imports);
     }
     for edge in db.get_edges_by_kind(EdgeKind::Calls)? {
-        let Some(&source_graph_id) = db_file_to_graph_node.get(&edge.source_file_id) else { continue };
-        let Some(target_file_id) = edge.target_file_id else { continue };
-        let Some(&target_graph_id) = db_file_to_graph_node.get(&target_file_id) else { continue };
+        let Some(&source_graph_id) = db_file_to_graph_node.get(&edge.source_file_id) else {
+            continue;
+        };
+        let Some(target_file_id) = edge.target_file_id else {
+            continue;
+        };
+        let Some(&target_graph_id) = db_file_to_graph_node.get(&target_file_id) else {
+            continue;
+        };
         graph.add_edge(source_graph_id, target_graph_id, EdgeKind::Calls);
     }
     for edge in db.get_symbol_edges_by_kind(EdgeKind::Calls.as_str())? {
-        let Some(&source_graph_id) = db_symbol_to_graph_node.get(&edge.source_symbol_id) else { continue };
-        let Some(&target_graph_id) = db_symbol_to_graph_node.get(&edge.target_symbol_id) else { continue };
+        let Some(&source_graph_id) = db_symbol_to_graph_node.get(&edge.source_symbol_id) else {
+            continue;
+        };
+        let Some(&target_graph_id) = db_symbol_to_graph_node.get(&edge.target_symbol_id) else {
+            continue;
+        };
         graph.add_edge(source_graph_id, target_graph_id, EdgeKind::Calls);
     }
     Ok(graph)
 }
 
-fn dead_code_candidates(graph: &CodeGraph) -> (Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>, Vec<serde_json::Value>) {
+fn dead_code_candidates(
+    graph: &CodeGraph,
+) -> (
+    Vec<serde_json::Value>,
+    Vec<serde_json::Value>,
+    Vec<serde_json::Value>,
+    Vec<serde_json::Value>,
+) {
     let mut high = Vec::new();
     let mut medium = Vec::new();
     let mut low = Vec::new();
@@ -929,17 +1142,22 @@ fn dead_code_candidates(graph: &CodeGraph) -> (Vec<serde_json::Value>, Vec<serde
     for node in graph
         .nodes
         .values()
-        .filter(|node| node.kind != NodeKind::File && node.kind != NodeKind::Test && node.kind != NodeKind::Module)
-        .filter(|node| node.file_path.as_deref().map(|path| !is_config_or_doc(path)).unwrap_or(true))
+        .filter(|node| {
+            node.kind != NodeKind::File
+                && node.kind != NodeKind::Test
+                && node.kind != NodeKind::Module
+        })
+        .filter(|node| {
+            node.file_path
+                .as_deref()
+                .map(|path| !is_config_or_doc(path))
+                .unwrap_or(true)
+        })
     {
         let incoming_calls = incoming_callers(graph, node.id);
         let touched_by_tests = incoming_test_callers(graph, node.id) > 0;
         let exported = is_public_api_node(node);
-        let entrypoint_like = node
-            .file_path
-            .as_deref()
-            .and_then(classify_flow)
-            .is_some();
+        let entrypoint_like = node.file_path.as_deref().and_then(classify_flow).is_some();
 
         if !incoming_calls.is_empty() || touched_by_tests || entrypoint_like {
             continue;
@@ -953,7 +1171,12 @@ fn dead_code_candidates(graph: &CodeGraph) -> (Vec<serde_json::Value>, Vec<serde
 
         if exported {
             public_api_risk.push(candidate);
-        } else if node.file_path.as_deref().map(|path| fan_in(graph, path) == 0).unwrap_or(false) {
+        } else if node
+            .file_path
+            .as_deref()
+            .map(|path| fan_in(graph, path) == 0)
+            .unwrap_or(false)
+        {
             high.push(candidate);
         } else if node.kind == NodeKind::Function || node.kind == NodeKind::Method {
             medium.push(candidate);
@@ -1023,20 +1246,27 @@ fn incoming_reference_count(graph: &CodeGraph, node_id: u64) -> usize {
         .iter()
         .filter(|edge| {
             edge.target_id == node_id
-                && matches!(edge.kind, EdgeKind::Calls | EdgeKind::Imports | EdgeKind::References | EdgeKind::Tests)
+                && matches!(
+                    edge.kind,
+                    EdgeKind::Calls | EdgeKind::Imports | EdgeKind::References | EdgeKind::Tests
+                )
         })
         .count()
 }
 
 fn dead_code_reason(graph: &CodeGraph, node_id: u64, exported: bool) -> String {
     if exported {
-        "No indexed callers were found, but the symbol looks public and may be used externally.".to_string()
+        "No indexed callers were found, but the symbol looks public and may be used externally."
+            .to_string()
     } else {
         let refs = incoming_reference_count(graph, node_id);
         if refs == 0 {
             "No indexed callers or references were found.".to_string()
         } else {
-            format!("{} non-call graph reference(s) remain; manual confirmation is recommended.", refs)
+            format!(
+                "{} non-call graph reference(s) remain; manual confirmation is recommended.",
+                refs
+            )
         }
     }
 }
@@ -1044,7 +1274,11 @@ fn dead_code_reason(graph: &CodeGraph, node_id: u64, exported: bool) -> String {
 fn is_public_api_node(node: &GraphNode) -> bool {
     node.visibility
         .as_deref()
-        .map(|visibility| visibility.contains("pub") || visibility.contains("public") || visibility.contains("export"))
+        .map(|visibility| {
+            visibility.contains("pub")
+                || visibility.contains("public")
+                || visibility.contains("export")
+        })
         .unwrap_or(false)
 }
 
@@ -1071,45 +1305,74 @@ fn run_graph_query(graph: &CodeGraph, query: &str) -> (String, Vec<NodeSummary>,
     let op = parts.next().unwrap_or("").trim();
     let target = parts.next().unwrap_or("").trim();
     match op {
-        "imports_of" | "deps_of" | "callees_of" => edge_query(graph, target, Direction::Outgoing, op),
-        "imported_by" | "rdeps_of" | "callers_of" => edge_query(graph, target, Direction::Incoming, op),
+        "imports_of" | "deps_of" | "callees_of" => {
+            edge_query(graph, target, Direction::Outgoing, op)
+        }
+        "imported_by" | "rdeps_of" | "callers_of" => {
+            edge_query(graph, target, Direction::Incoming, op)
+        }
         "symbols_in" => {
-            let nodes = graph.nodes.values()
+            let nodes = graph
+                .nodes
+                .values()
                 .filter(|n| n.kind != NodeKind::File && n.file_path.as_deref() == Some(target))
                 .map(NodeSummary::from)
                 .collect::<Vec<_>>();
             (op.to_string(), nodes, Vec::new())
         }
         _ => {
-            let nodes = search_nodes(graph, query, None, 50).into_iter().map(|h| h.node).collect();
+            let nodes = search_nodes(graph, query, None, 50)
+                .into_iter()
+                .map(|h| h.node)
+                .collect();
             ("search".to_string(), nodes, Vec::new())
         }
     }
 }
 
-fn edge_query(graph: &CodeGraph, target: &str, direction: Direction, mode: &str) -> (String, Vec<NodeSummary>, Vec<EdgeSummary>) {
+fn edge_query(
+    graph: &CodeGraph,
+    target: &str,
+    direction: Direction,
+    mode: &str,
+) -> (String, Vec<NodeSummary>, Vec<EdgeSummary>) {
     let start_nodes = find_matching_nodes(graph, target);
     let start_ids = start_nodes.iter().map(|n| n.id).collect::<HashSet<_>>();
-    let edges = graph.edges.iter()
+    let edges = graph
+        .edges
+        .iter()
         .filter(|e| e.kind == EdgeKind::Imports || e.kind == EdgeKind::Calls)
         .filter(|e| match direction {
             Direction::Incoming => start_ids.contains(&e.target_id),
             Direction::Outgoing => start_ids.contains(&e.source_id),
         })
-        .filter_map(|e| Some(EdgeSummary {
-            source: NodeSummary::from(graph.get_node(e.source_id)?),
-            target: NodeSummary::from(graph.get_node(e.target_id)?),
-            kind: e.kind.as_str().to_string(),
-        }))
+        .filter_map(|e| {
+            Some(EdgeSummary {
+                source: NodeSummary::from(graph.get_node(e.source_id)?),
+                target: NodeSummary::from(graph.get_node(e.target_id)?),
+                kind: e.kind.as_str().to_string(),
+            })
+        })
         .collect::<Vec<_>>();
-    (mode.to_string(), start_nodes.into_iter().map(NodeSummary::from).collect(), edges)
+    (
+        mode.to_string(),
+        start_nodes.into_iter().map(NodeSummary::from).collect(),
+        edges,
+    )
 }
 
-fn search_nodes(graph: &CodeGraph, query: &str, kind: Option<&str>, limit: usize) -> Vec<SearchHit> {
+fn search_nodes(
+    graph: &CodeGraph,
+    query: &str,
+    kind: Option<&str>,
+    limit: usize,
+) -> Vec<SearchHit> {
     let terms = search_terms(query);
     let kind = kind.map(str::to_lowercase);
     let query_lower = query.to_lowercase();
-    let mut hits = graph.nodes.values()
+    let mut hits = graph
+        .nodes
+        .values()
         .filter(|node| kind.as_ref().map_or(true, |k| node.kind.as_str() == k))
         .filter_map(|node| {
             let mut score = 0.0;
@@ -1117,11 +1380,19 @@ fn search_nodes(graph: &CodeGraph, query: &str, kind: Option<&str>, limit: usize
             let path = node.file_path.as_deref().unwrap_or("").to_lowercase();
             let sig = node.signature.as_deref().unwrap_or("").to_lowercase();
             let haystack = format!("{} {} {} {}", name, path, sig, node.kind.as_str());
-            if haystack.contains(&query_lower) { score += 5.0; }
+            if haystack.contains(&query_lower) {
+                score += 5.0;
+            }
             for term in &terms {
-                if name.contains(term) { score += 3.0; }
-                if path.contains(term) { score += 2.0; }
-                if sig.contains(term) { score += 1.0; }
+                if name.contains(term) {
+                    score += 3.0;
+                }
+                if path.contains(term) {
+                    score += 2.0;
+                }
+                if sig.contains(term) {
+                    score += 1.0;
+                }
             }
             (score > 0.0).then(|| SearchHit {
                 score,
@@ -1130,24 +1401,211 @@ fn search_nodes(graph: &CodeGraph, query: &str, kind: Option<&str>, limit: usize
             })
         })
         .collect::<Vec<_>>();
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits.truncate(limit);
     hits
 }
 
-fn find_matching_nodes<'a>(graph: &'a CodeGraph, selector: &str) -> Vec<&'a GraphNode> {
-    let selector_lower = selector.to_lowercase();
-    let mut nodes = graph.nodes.values()
-        .filter(|node| {
-            node.name.to_lowercase().contains(&selector_lower)
-                || node.file_path.as_deref().map_or(false, |p| p == selector || p.to_lowercase().contains(&selector_lower))
+fn hybrid_search_nodes(
+    db: &CacheDb,
+    graph: &CodeGraph,
+    query: &str,
+    kind: Option<&str>,
+    limit: usize,
+    base_hits: Vec<SearchHit>,
+    semantic_backend: &str,
+) -> Result<Vec<SearchHit>> {
+    let query_vector = embed_query(query, semantic_backend)?;
+    let vectors = db.get_search_vectors(semantic_backend, kind)?;
+    if vectors.is_empty() {
+        return Ok(base_hits);
+    }
+    let importance = graph.importance_scores();
+    let max_importance = importance
+        .values()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    let mut base_scores = HashMap::new();
+    let max_base_score = base_hits
+        .iter()
+        .map(|hit| hit.score)
+        .fold(0.0_f64, f64::max)
+        .max(1.0);
+    for hit in &base_hits {
+        base_scores.insert(hit.node.id as i64, hit.score / max_base_score);
+    }
+
+    let mut merged = vectors
+        .into_iter()
+        .map(|candidate| {
+            let vector_score = cosine_similarity(&query_vector, &candidate.vector).max(0.0) as f64;
+            let lexical_score = base_scores.get(&candidate.node_id).copied().unwrap_or(0.0);
+            let centrality = importance
+                .get(&(candidate.node_id as u64))
+                .copied()
+                .unwrap_or(0.0)
+                / max_importance;
+            let kind_boost = if candidate.kind == "function" || candidate.kind == "method" {
+                0.05
+            } else if candidate.kind == "file" {
+                0.0
+            } else {
+                0.02
+            };
+            let score =
+                (lexical_score * 0.45) + (vector_score * 0.45) + (centrality * 0.10) + kind_boost;
+            SearchHit {
+                score,
+                match_reason: if lexical_score > 0.0 {
+                    "hybrid_fts_vector_graph".to_string()
+                } else {
+                    "semantic_vector_graph".to_string()
+                },
+                node: NodeSummary {
+                    id: u64::try_from(candidate.node_id.max(0)).unwrap_or_default(),
+                    name: candidate.name,
+                    kind: candidate.kind,
+                    file_path: Some(candidate.file_path),
+                    line: None,
+                    signature: candidate.signature,
+                },
+            }
         })
         .collect::<Vec<_>>();
-    nodes.sort_by_key(|n| (n.file_path.clone().unwrap_or_default(), n.start_line.unwrap_or(0)));
+
+    merged.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.node.name.cmp(&b.node.name))
+    });
+    merged.dedup_by(|a, b| a.node.id == b.node.id);
+    if merged.is_empty() {
+        return Ok(base_hits);
+    }
+    merged.truncate(limit);
+    Ok(merged)
+}
+
+fn resolved_semantic_backend(db: &CacheDb, requested: Option<&str>) -> String {
+    requested
+        .map(str::to_string)
+        .or_else(|| env::var("REPOSCRY_SEMANTIC_BACKEND").ok())
+        .or_else(|| db.get_config("semantic_backend").ok().flatten())
+        .unwrap_or_else(|| LOCAL_SEMANTIC_BACKEND.to_string())
+}
+
+fn embed_query(query: &str, backend: &str) -> Result<Vec<f32>> {
+    match backend {
+        OLLAMA_BACKEND => ollama_embedding(
+            &env::var("REPOSCRY_OLLAMA_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:11434/api/embeddings".to_string()),
+            &env::var("REPOSCRY_OLLAMA_MODEL").unwrap_or_else(|_| "nomic-embed-text".to_string()),
+            query,
+        ),
+        _ => Ok(local_text_embedding(query)),
+    }
+}
+
+fn local_text_embedding(text: &str) -> Vec<f32> {
+    let mut vector = vec![0.0_f32; LOCAL_SEMANTIC_DIMS];
+    for token in text
+        .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
+        .filter(|token| !token.is_empty())
+    {
+        let token = token.to_lowercase();
+        let hash = blake3::hash(token.as_bytes());
+        let bytes = hash.as_bytes();
+        let bucket = usize::from(bytes[0]) % LOCAL_SEMANTIC_DIMS;
+        let sign = if bytes[1] % 2 == 0 { 1.0 } else { -1.0 };
+        let weight = 1.0 + (f32::from(bytes[2]) / 255.0);
+        vector[bucket] += sign * weight;
+    }
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in &mut vector {
+            *value /= norm;
+        }
+    }
+    vector
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    if left.len() != right.len() || left.is_empty() {
+        return 0.0;
+    }
+    let dot = left
+        .iter()
+        .zip(right.iter())
+        .map(|(a, b)| a * b)
+        .sum::<f32>();
+    let left_norm = left.iter().map(|value| value * value).sum::<f32>().sqrt();
+    let right_norm = right.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if left_norm == 0.0 || right_norm == 0.0 {
+        0.0
+    } else {
+        dot / (left_norm * right_norm)
+    }
+}
+
+fn ollama_embedding(url: &str, model: &str, text: &str) -> Result<Vec<f32>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let response = client
+        .post(url)
+        .json(&json!({
+            "model": model,
+            "prompt": text,
+        }))
+        .send()?
+        .error_for_status()?;
+    let payload: Value = response.json()?;
+    let embedding = payload
+        .get("embedding")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("ollama response missing embedding array"))?;
+    let vector = embedding
+        .iter()
+        .map(|value| value.as_f64().unwrap_or_default() as f32)
+        .collect::<Vec<_>>();
+    if vector.is_empty() {
+        return Err(anyhow!("ollama returned an empty embedding"));
+    }
+    Ok(vector)
+}
+
+fn find_matching_nodes<'a>(graph: &'a CodeGraph, selector: &str) -> Vec<&'a GraphNode> {
+    let selector_lower = selector.to_lowercase();
+    let mut nodes = graph
+        .nodes
+        .values()
+        .filter(|node| {
+            node.name.to_lowercase().contains(&selector_lower)
+                || node.file_path.as_deref().map_or(false, |p| {
+                    p == selector || p.to_lowercase().contains(&selector_lower)
+                })
+        })
+        .collect::<Vec<_>>();
+    nodes.sort_by_key(|n| {
+        (
+            n.file_path.clone().unwrap_or_default(),
+            n.start_line.unwrap_or(0),
+        )
+    });
     nodes
 }
 
-fn walk_reverse_imports(graph: &CodeGraph, start_paths: &[String], max_depth: usize) -> Vec<ImpactedFile> {
+fn walk_reverse_imports(
+    graph: &CodeGraph,
+    start_paths: &[String],
+    max_depth: usize,
+) -> Vec<ImpactedFile> {
     let start_set = start_paths.iter().cloned().collect::<HashSet<_>>();
     let mut queue = VecDeque::new();
     let mut visited: HashMap<u64, usize> = HashMap::new();
@@ -1158,27 +1616,50 @@ fn walk_reverse_imports(graph: &CodeGraph, start_paths: &[String], max_depth: us
         }
     }
     while let Some((node_id, depth)) = queue.pop_front() {
-        if depth >= max_depth { continue; }
-        for edge in graph.edges.iter().filter(|e| e.kind == EdgeKind::Imports && e.target_id == node_id) {
-            if let std::collections::hash_map::Entry::Vacant(entry) = visited.entry(edge.source_id) {
+        if depth >= max_depth {
+            continue;
+        }
+        for edge in graph
+            .edges
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Imports && e.target_id == node_id)
+        {
+            if let std::collections::hash_map::Entry::Vacant(entry) = visited.entry(edge.source_id)
+            {
                 entry.insert(depth + 1);
                 queue.push_back((edge.source_id, depth + 1));
             }
         }
     }
-    let mut files = visited.into_iter()
+    let mut files = visited
+        .into_iter()
         .filter_map(|(id, depth)| {
             let path = graph.get_node(id)?.file_path.clone()?;
-            let reason = if start_set.contains(&path) { "changed_or_target_file" } else { "reverse_import_dependency" };
-            Some(ImpactedFile { path, depth, reason: reason.to_string() })
+            let reason = if start_set.contains(&path) {
+                "changed_or_target_file"
+            } else {
+                "reverse_import_dependency"
+            };
+            Some(ImpactedFile {
+                path,
+                depth,
+                reason: reason.to_string(),
+            })
         })
         .collect::<Vec<_>>();
     files.sort_by(|a, b| a.depth.cmp(&b.depth).then_with(|| a.path.cmp(&b.path)));
     files
 }
 
-fn infer_flows(graph: &CodeGraph, changed_paths: &[String], impacted: &[ImpactedFile]) -> Vec<FlowSummary> {
-    let impacted_paths = impacted.iter().map(|file| file.path.clone()).collect::<HashSet<_>>();
+fn infer_flows(
+    graph: &CodeGraph,
+    changed_paths: &[String],
+    impacted: &[ImpactedFile],
+) -> Vec<FlowSummary> {
+    let impacted_paths = impacted
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<HashSet<_>>();
     let changed_set = changed_paths.iter().cloned().collect::<HashSet<_>>();
     let changed_file_ids = changed_paths
         .iter()
@@ -1192,7 +1673,9 @@ fn infer_flows(graph: &CodeGraph, changed_paths: &[String], impacted: &[Impacted
             graph
                 .edges
                 .iter()
-                .filter(move |edge| edge.kind == EdgeKind::Contains && edge.source_id == file_node.id)
+                .filter(move |edge| {
+                    edge.kind == EdgeKind::Contains && edge.source_id == file_node.id
+                })
                 .map(|edge| edge.target_id)
                 .collect::<Vec<_>>()
         })
@@ -1205,7 +1688,8 @@ fn infer_flows(graph: &CodeGraph, changed_paths: &[String], impacted: &[Impacted
         .filter_map(|node| {
             let path = node.file_path.as_ref()?;
             let kind = classify_flow(path)?;
-            let trace = trace_flow_from_entrypoint(graph, node.id, &changed_file_ids, &changed_symbol_ids)?;
+            let trace =
+                trace_flow_from_entrypoint(graph, node.id, &changed_file_ids, &changed_symbol_ids)?;
             let changed_symbols = flow_changed_symbols(graph, &trace, &changed_set);
             let touched_files = trace
                 .iter()
@@ -1249,7 +1733,9 @@ fn trace_flow_from_entrypoint(
     let mut visited = HashSet::from([entrypoint_id]);
 
     while let Some((node_id, path)) = queue.pop_front() {
-        if node_id != entrypoint_id && (changed_file_ids.contains(&node_id) || changed_symbol_ids.contains(&node_id)) {
+        if node_id != entrypoint_id
+            && (changed_file_ids.contains(&node_id) || changed_symbol_ids.contains(&node_id))
+        {
             return Some(path);
         }
 
@@ -1266,7 +1752,9 @@ fn trace_flow_from_entrypoint(
 }
 
 fn flow_neighbors(graph: &CodeGraph, node_id: u64) -> Vec<u64> {
-    let Some(node) = graph.get_node(node_id) else { return Vec::new() };
+    let Some(node) = graph.get_node(node_id) else {
+        return Vec::new();
+    };
     let mut neighbors = Vec::new();
 
     match node.kind {
@@ -1300,7 +1788,9 @@ fn flow_neighbors(graph: &CodeGraph, node_id: u64) -> Vec<u64> {
                         graph
                             .edges
                             .iter()
-                            .filter(|edge| edge.kind == EdgeKind::Imports && edge.source_id == file_node.id)
+                            .filter(|edge| {
+                                edge.kind == EdgeKind::Imports && edge.source_id == file_node.id
+                            })
                             .map(|edge| edge.target_id),
                     );
                 }
@@ -1322,12 +1812,21 @@ fn render_flow_path(graph: &CodeGraph, trace: &[u64]) -> Vec<String> {
         .collect()
 }
 
-fn flow_changed_symbols(graph: &CodeGraph, trace: &[u64], changed_paths: &HashSet<String>) -> Vec<String> {
+fn flow_changed_symbols(
+    graph: &CodeGraph,
+    trace: &[u64],
+    changed_paths: &HashSet<String>,
+) -> Vec<String> {
     let mut symbols = trace
         .iter()
         .filter_map(|id| graph.get_node(*id))
         .filter(|node| node.kind != NodeKind::File)
-        .filter(|node| node.file_path.as_ref().map(|path| changed_paths.contains(path)).unwrap_or(false))
+        .filter(|node| {
+            node.file_path
+                .as_ref()
+                .map(|path| changed_paths.contains(path))
+                .unwrap_or(false)
+        })
         .map(|node| node.name.clone())
         .collect::<Vec<_>>();
     symbols.sort();
@@ -1342,7 +1841,14 @@ fn flow_reason(graph: &CodeGraph, trace: &[u64], changed_paths: &HashSet<String>
     let ends_in_changed_symbol = trace
         .last()
         .and_then(|id| graph.get_node(*id))
-        .map(|node| node.kind != NodeKind::File && node.file_path.as_ref().map(|path| changed_paths.contains(path)).unwrap_or(false))
+        .map(|node| {
+            node.kind != NodeKind::File
+                && node
+                    .file_path
+                    .as_ref()
+                    .map(|path| changed_paths.contains(path))
+                    .unwrap_or(false)
+        })
         .unwrap_or(false);
     if ends_in_changed_symbol {
         "entrypoint reaches changed symbol through indexed calls".to_string()
@@ -1353,9 +1859,11 @@ fn flow_reason(graph: &CodeGraph, trace: &[u64], changed_paths: &HashSet<String>
 
 fn flow_risk(graph: &CodeGraph, trace: &[u64], touched_files: &[String]) -> String {
     let touches_risky_path = touched_files.iter().any(|path| is_risky_path(path));
-    let has_call_chain = trace
-        .windows(2)
-        .any(|pair| graph.edges.iter().any(|edge| edge.kind == EdgeKind::Calls && edge.source_id == pair[0] && edge.target_id == pair[1]));
+    let has_call_chain = trace.windows(2).any(|pair| {
+        graph.edges.iter().any(|edge| {
+            edge.kind == EdgeKind::Calls && edge.source_id == pair[0] && edge.target_id == pair[1]
+        })
+    });
     if touches_risky_path || has_call_chain || trace.len() >= 5 {
         "high".to_string()
     } else if trace.len() >= 3 {
@@ -1379,19 +1887,38 @@ fn classify_flow(path: &str) -> Option<String> {
     let lower = path.to_lowercase();
     if lower.ends_with("/middleware.ts") || lower.ends_with("/middleware.js") {
         Some("nextjs_middleware".to_string())
-    } else if lower.ends_with("/route.ts") || lower.ends_with("/route.tsx") || lower.ends_with("/route.js") || lower.contains("/pages/api/") {
+    } else if lower.ends_with("/route.ts")
+        || lower.ends_with("/route.tsx")
+        || lower.ends_with("/route.js")
+        || lower.contains("/pages/api/")
+    {
         Some("nextjs_api_route".to_string())
-    } else if lower.ends_with("/layout.tsx") || lower.ends_with("/layout.ts") || lower.ends_with("/layout.jsx") {
+    } else if lower.ends_with("/layout.tsx")
+        || lower.ends_with("/layout.ts")
+        || lower.ends_with("/layout.jsx")
+    {
         Some("nextjs_layout".to_string())
-    } else if lower.ends_with("/page.tsx") || lower.ends_with("/page.ts") || lower.ends_with("/page.jsx") {
+    } else if lower.ends_with("/page.tsx")
+        || lower.ends_with("/page.ts")
+        || lower.ends_with("/page.jsx")
+    {
         Some("nextjs_page".to_string())
-    } else if lower.contains("action") && (lower.ends_with(".ts") || lower.ends_with(".tsx") || lower.ends_with(".js")) {
+    } else if lower.contains("action")
+        && (lower.ends_with(".ts") || lower.ends_with(".tsx") || lower.ends_with(".js"))
+    {
         Some("server_action".to_string())
-    } else if lower == "src/main.rs" || lower.ends_with("/src/main.rs") || lower.contains("/src/bin/") {
+    } else if lower == "src/main.rs"
+        || lower.ends_with("/src/main.rs")
+        || lower.contains("/src/bin/")
+    {
         Some("rust_binary".to_string())
     } else if lower.contains("axum") || lower.contains("actix") || lower.contains("/routes/") {
         Some("rust_route_module".to_string())
-    } else if lower.ends_with("fastapi.py") || lower.contains("fastapi") || lower.contains("/views.py") || lower.contains("/django/") {
+    } else if lower.ends_with("fastapi.py")
+        || lower.contains("fastapi")
+        || lower.contains("/views.py")
+        || lower.contains("/django/")
+    {
         Some("python_route".to_string())
     } else if lower.contains("celery") || lower.contains("task") && lower.ends_with(".py") {
         Some("python_task".to_string())
@@ -1412,23 +1939,51 @@ fn risk_reasons(
     tests: &[SuggestedTest],
 ) -> Vec<String> {
     let mut reasons = Vec::new();
-    if impacted.len() > 20 { reasons.push(format!("Wide blast radius: {} indexed files are affected.", impacted.len())); }
-    if !flows.is_empty() { reasons.push(format!("{} entrypoint-like flow(s) are affected.", flows.len())); }
+    if impacted.len() > 20 {
+        reasons.push(format!(
+            "Wide blast radius: {} indexed files are affected.",
+            impacted.len()
+        ));
+    }
+    if !flows.is_empty() {
+        reasons.push(format!(
+            "{} entrypoint-like flow(s) are affected.",
+            flows.len()
+        ));
+    }
     if tests.is_empty() && changes.iter().any(|c| !is_test_file(&c.path)) {
         reasons.push("Source files changed but no indexed test candidates were found.".to_string());
     }
     for change in changes {
         let fan_in_count = fan_in(graph, &change.path);
-        if fan_in_count > 5 { reasons.push(format!("{} has high fan-in: {} dependents.", change.path, fan_in_count)); }
-        if is_risky_path(&change.path) { reasons.push(format!("{} touches a high-risk path or concern.", change.path)); }
+        if fan_in_count > 5 {
+            reasons.push(format!(
+                "{} has high fan-in: {} dependents.",
+                change.path, fan_in_count
+            ));
+        }
+        if is_risky_path(&change.path) {
+            reasons.push(format!(
+                "{} touches a high-risk path or concern.",
+                change.path
+            ));
+        }
     }
     reasons.sort();
     reasons.dedup();
     reasons
 }
 
-fn risk_score(changes: &[GitChange], impacted: &[ImpactedFile], flows: &[FlowSummary], reasons: &[String]) -> u32 {
-    let changed_lines = changes.iter().map(|c| c.lines_added + c.lines_deleted).sum::<i64>();
+fn risk_score(
+    changes: &[GitChange],
+    impacted: &[ImpactedFile],
+    flows: &[FlowSummary],
+    reasons: &[String],
+) -> u32 {
+    let changed_lines = changes
+        .iter()
+        .map(|c| c.lines_added + c.lines_deleted)
+        .sum::<i64>();
     let mut score = 0u32;
     score += (changes.len() as u32).saturating_mul(5).min(25);
     score += ((changed_lines / 40).max(0) as u32).min(20);
@@ -1447,7 +2002,11 @@ fn risk_level(score: u32) -> &'static str {
     }
 }
 
-fn suggested_tests_for_selector(graph: &CodeGraph, selector: &str, limit: usize) -> Vec<SuggestedTest> {
+fn suggested_tests_for_selector(
+    graph: &CodeGraph,
+    selector: &str,
+    limit: usize,
+) -> Vec<SuggestedTest> {
     let matched_nodes = find_matching_nodes(graph, selector);
     let paths = matched_nodes
         .iter()
@@ -1456,7 +2015,11 @@ fn suggested_tests_for_selector(graph: &CodeGraph, selector: &str, limit: usize)
     suggested_tests(graph, &paths, &matched_nodes, limit)
 }
 
-fn suggested_tests_for_paths(graph: &CodeGraph, paths: &[String], limit: usize) -> Vec<SuggestedTest> {
+fn suggested_tests_for_paths(
+    graph: &CodeGraph,
+    paths: &[String],
+    limit: usize,
+) -> Vec<SuggestedTest> {
     let matched_nodes = paths
         .iter()
         .filter_map(|path| file_node_by_path(graph, path))
@@ -1551,13 +2114,18 @@ fn suggested_tests(
                 .count();
             if direct_imports > 0 {
                 score += 5.0 + (direct_imports.saturating_sub(1) as f64);
-                reasons.push(format!("directly imports {} changed/target file(s)", direct_imports));
+                reasons.push(format!(
+                    "directly imports {} changed/target file(s)",
+                    direct_imports
+                ));
             }
 
             let call_matches = graph
                 .edges
                 .iter()
-                .filter(|edge| edge.kind == EdgeKind::Calls && relevant_symbol_ids.contains(&edge.target_id))
+                .filter(|edge| {
+                    edge.kind == EdgeKind::Calls && relevant_symbol_ids.contains(&edge.target_id)
+                })
                 .filter_map(|edge| {
                     let source = graph.get_node(edge.source_id)?;
                     (source.kind == NodeKind::Test && source.file_path.as_deref() == Some(&path))
@@ -1569,7 +2137,10 @@ fn suggested_tests(
                     matched_symbols.insert(test_name.clone(), *target_id);
                 }
                 score += 6.0 + (call_matches.len().min(3) as f64);
-                reasons.push(format!("test symbol call edges reach {} target symbol(s)", call_matches.len()));
+                reasons.push(format!(
+                    "test symbol call edges reach {} target symbol(s)",
+                    call_matches.len()
+                ));
             }
 
             let path_lower = path.to_lowercase();
@@ -1583,7 +2154,10 @@ fn suggested_tests(
             }
 
             if !paths.is_empty() {
-                let target_modules = relevant_paths.iter().map(|candidate| module_name(candidate)).collect::<HashSet<_>>();
+                let target_modules = relevant_paths
+                    .iter()
+                    .map(|candidate| module_name(candidate))
+                    .collect::<HashSet<_>>();
                 if target_modules.contains(&module_name(&path)) {
                     score += 1.5;
                     reasons.push("same top-level module as target".to_string());
@@ -1605,7 +2179,10 @@ fn suggested_tests(
             };
 
             Some(SuggestedTest {
-                command: suggested_test_command(&path, selected_symbols.first().map(String::as_str)),
+                command: suggested_test_command(
+                    &path,
+                    selected_symbols.first().map(String::as_str),
+                ),
                 confidence: test_confidence(score).to_string(),
                 score,
                 reasons,
@@ -1668,11 +2245,16 @@ fn test_confidence(score: f64) -> &'static str {
 }
 
 fn top_degrees(graph: &CodeGraph, direction: Direction, limit: usize) -> Vec<FileDegree> {
-    let mut degrees = graph.nodes.values()
+    let mut degrees = graph
+        .nodes
+        .values()
         .filter(|n| n.kind == NodeKind::File)
         .filter_map(|n| {
             let path = n.file_path.clone()?;
-            let count = match direction { Direction::Incoming => fan_in(graph, &path), Direction::Outgoing => fan_out(graph, &path) };
+            let count = match direction {
+                Direction::Incoming => fan_in(graph, &path),
+                Direction::Outgoing => fan_out(graph, &path),
+            };
             (count > 0).then_some(FileDegree { path, count })
         })
         .collect::<Vec<_>>();
@@ -1689,30 +2271,52 @@ fn summarize_modules(files: &[CachedFile]) -> Vec<ModuleSummary> {
         entry.0 += 1;
         entry.1 += file.loc;
     }
-    let mut output = modules.into_iter().map(|(module, (files, loc))| ModuleSummary { module, files, loc }).collect::<Vec<_>>();
+    let mut output = modules
+        .into_iter()
+        .map(|(module, (files, loc))| ModuleSummary { module, files, loc })
+        .collect::<Vec<_>>();
     output.sort_by(|a, b| b.files.cmp(&a.files).then_with(|| a.module.cmp(&b.module)));
     output
 }
 
 fn module_name(path: &str) -> String {
     let parts = path.split('/').collect::<Vec<_>>();
-    if parts.len() >= 2 && parts[0] == "crates" { format!("crates/{}", parts[1]) } else { parts.first().copied().unwrap_or("root").to_string() }
+    if parts.len() >= 2 && parts[0] == "crates" {
+        format!("crates/{}", parts[1])
+    } else {
+        parts.first().copied().unwrap_or("root").to_string()
+    }
 }
 
 fn fan_in(graph: &CodeGraph, path: &str) -> usize {
     file_node_by_path(graph, path)
-        .map(|node| graph.edges.iter().filter(|e| e.kind == EdgeKind::Imports && e.target_id == node.id).count())
+        .map(|node| {
+            graph
+                .edges
+                .iter()
+                .filter(|e| e.kind == EdgeKind::Imports && e.target_id == node.id)
+                .count()
+        })
         .unwrap_or(0)
 }
 
 fn fan_out(graph: &CodeGraph, path: &str) -> usize {
     file_node_by_path(graph, path)
-        .map(|node| graph.edges.iter().filter(|e| e.kind == EdgeKind::Imports && e.source_id == node.id).count())
+        .map(|node| {
+            graph
+                .edges
+                .iter()
+                .filter(|e| e.kind == EdgeKind::Imports && e.source_id == node.id)
+                .count()
+        })
         .unwrap_or(0)
 }
 
 fn file_node_by_path<'a>(graph: &'a CodeGraph, path: &str) -> Option<&'a GraphNode> {
-    graph.nodes.values().find(|n| n.kind == NodeKind::File && n.file_path.as_deref() == Some(path))
+    graph
+        .nodes
+        .values()
+        .find(|n| n.kind == NodeKind::File && n.file_path.as_deref() == Some(path))
 }
 
 fn display_node(node: &GraphNode) -> String {
@@ -1720,7 +2324,11 @@ fn display_node(node: &GraphNode) -> String {
 }
 
 fn search_terms(input: &str) -> Vec<String> {
-    input.split(|ch: char| !ch.is_alphanumeric()).filter(|p| p.len() > 2).map(|p| p.to_lowercase()).collect()
+    input
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|p| p.len() > 2)
+        .map(|p| p.to_lowercase())
+        .collect()
 }
 
 fn is_test_file(path: &str) -> bool {
@@ -1730,14 +2338,35 @@ fn is_test_file(path: &str) -> bool {
 
 fn is_config_or_doc(path: &str) -> bool {
     let lower = path.to_lowercase();
-    lower.ends_with(".md") || lower.ends_with(".json") || lower.ends_with(".toml") || lower.ends_with(".yaml") || lower.ends_with(".yml") || lower.contains("config")
+    lower.ends_with(".md")
+        || lower.ends_with(".json")
+        || lower.ends_with(".toml")
+        || lower.ends_with(".yaml")
+        || lower.ends_with(".yml")
+        || lower.contains("config")
 }
 
 fn is_risky_path(path: &str) -> bool {
     let lower = path.to_lowercase();
-    ["auth", "session", "payment", "stripe", "billing", "db", "database", "schema", "migration", "security", "permission", "route", "api", "env", "config"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "auth",
+        "session",
+        "payment",
+        "stripe",
+        "billing",
+        "db",
+        "database",
+        "schema",
+        "migration",
+        "security",
+        "permission",
+        "route",
+        "api",
+        "env",
+        "config",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn graph_limitations() -> Vec<String> {
@@ -1767,15 +2396,25 @@ fn print_output(value: &serde_json::Value, format: &str, markdown: String) -> Re
 }
 
 fn render_detect_markdown(value: &serde_json::Value) -> String {
-    format!("# Change risk analysis\n\n```json\n{}\n```", serde_json::to_string_pretty(value).unwrap_or_default())
+    format!(
+        "# Change risk analysis\n\n```json\n{}\n```",
+        serde_json::to_string_pretty(value).unwrap_or_default()
+    )
 }
 
 fn render_arch_markdown(value: &serde_json::Value) -> String {
-    format!("# Architecture overview\n\n```json\n{}\n```", serde_json::to_string_pretty(value).unwrap_or_default())
+    format!(
+        "# Architecture overview\n\n```json\n{}\n```",
+        serde_json::to_string_pretty(value).unwrap_or_default()
+    )
 }
 
 fn render_simple_markdown(title: &str, value: &serde_json::Value) -> String {
-    format!("# {}\n\n```json\n{}\n```", title, serde_json::to_string_pretty(value).unwrap_or_default())
+    format!(
+        "# {}\n\n```json\n{}\n```",
+        title,
+        serde_json::to_string_pretty(value).unwrap_or_default()
+    )
 }
 
 #[cfg(test)]
@@ -1819,7 +2458,10 @@ mod tests {
 
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].path, "tests/orders_spec.rs");
-        assert!(suggestions[0].reasons.iter().any(|reason| reason.contains("directly imports")));
+        assert!(suggestions[0]
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("directly imports")));
         assert_eq!(suggestions[0].confidence, "medium");
     }
 
@@ -1828,8 +2470,18 @@ mod tests {
         let mut graph = CodeGraph::new();
         let src = file_node(&mut graph, "src/cache.rs");
         let test_file = file_node(&mut graph, "tests/cache_test.rs");
-        let target_symbol = symbol_node(&mut graph, NodeKind::Function, "src/cache.rs", "rebuild_graph");
-        let test_symbol = symbol_node(&mut graph, NodeKind::Test, "tests/cache_test.rs", "test_rebuild_graph");
+        let target_symbol = symbol_node(
+            &mut graph,
+            NodeKind::Function,
+            "src/cache.rs",
+            "rebuild_graph",
+        );
+        let test_symbol = symbol_node(
+            &mut graph,
+            NodeKind::Test,
+            "tests/cache_test.rs",
+            "test_rebuild_graph",
+        );
         graph.add_edge(src, target_symbol, EdgeKind::Contains);
         graph.add_edge(test_file, test_symbol, EdgeKind::Contains);
         graph.add_edge(test_symbol, target_symbol, EdgeKind::Calls);
@@ -1842,7 +2494,10 @@ mod tests {
             .reasons
             .iter()
             .any(|reason| reason.contains("call edges")));
-        assert!(suggestions[0].test_symbols.iter().any(|name| name == "test_rebuild_graph"));
+        assert!(suggestions[0]
+            .test_symbols
+            .iter()
+            .any(|name| name == "test_rebuild_graph"));
         assert_eq!(suggestions[0].confidence, "high");
     }
 
@@ -1852,7 +2507,12 @@ mod tests {
         let entry_file = file_node(&mut graph, "src/main.rs");
         let changed_file = file_node(&mut graph, "src/orders.rs");
         let main_symbol = symbol_node(&mut graph, NodeKind::Function, "src/main.rs", "main");
-        let changed_symbol = symbol_node(&mut graph, NodeKind::Function, "src/orders.rs", "process_order");
+        let changed_symbol = symbol_node(
+            &mut graph,
+            NodeKind::Function,
+            "src/orders.rs",
+            "process_order",
+        );
 
         graph.add_edge(entry_file, main_symbol, EdgeKind::Contains);
         graph.add_edge(changed_file, changed_symbol, EdgeKind::Contains);
@@ -1880,7 +2540,7 @@ mod tests {
             1024,
         )
         .unwrap();
-        assert_eq!(response["result"]["serverInfo"]["name"], "reposcry-crg");
+        assert_eq!(response["result"]["serverInfo"]["name"], "reposcry");
         assert_eq!(response["result"]["protocolVersion"], "2024-11-05");
     }
 
@@ -1914,7 +2574,10 @@ mod tests {
         assert_eq!(response["result"]["isError"], false);
         let content = response["result"]["content"].as_array().unwrap();
         assert_eq!(content[0]["type"], "text");
-        assert!(content[0]["text"].as_str().unwrap().contains("get_architecture_overview"));
+        assert!(content[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("get_architecture_overview"));
     }
 
     #[test]
@@ -1937,5 +2600,75 @@ mod tests {
         )
         .unwrap();
         assert_eq!(response["error"]["code"], -32001);
+    }
+
+    #[test]
+    fn hybrid_search_ranks_semantic_vector_hits() {
+        let db = CacheDb::open_in_memory().unwrap();
+        let mut graph = CodeGraph::new();
+        let node_id = graph.add_node(NodeKind::Function, "cache_rebuild");
+        let node = graph.nodes.get_mut(&node_id).unwrap();
+        node.file_path = Some("src/cache.rs".to_string());
+        node.signature = Some("fn cache_rebuild()".to_string());
+
+        let vector = local_text_embedding("cache database calls");
+        db.insert_search_vector(
+            node_id as i64,
+            "src/cache.rs",
+            "function",
+            "cache_rebuild",
+            Some("fn cache_rebuild()"),
+            LOCAL_SEMANTIC_BACKEND,
+            &vector,
+        )
+        .unwrap();
+
+        let hits = hybrid_search_nodes(
+            &db,
+            &graph,
+            "cache database calls",
+            None,
+            10,
+            Vec::new(),
+            LOCAL_SEMANTIC_BACKEND,
+        )
+        .unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node.name, "cache_rebuild");
+        assert_eq!(hits[0].match_reason, "semantic_vector_graph");
+    }
+
+    #[test]
+    fn hybrid_search_falls_back_to_lexical_hits_when_vectors_missing() {
+        let db = CacheDb::open_in_memory().unwrap();
+        let graph = CodeGraph::new();
+        let base_hits = vec![SearchHit {
+            score: 5.0,
+            match_reason: "fts5".to_string(),
+            node: NodeSummary {
+                id: 1,
+                name: "fallback".to_string(),
+                kind: "file".to_string(),
+                file_path: Some("README.md".to_string()),
+                line: None,
+                signature: None,
+            },
+        }];
+
+        let hits = hybrid_search_nodes(
+            &db,
+            &graph,
+            "cache database calls",
+            None,
+            10,
+            base_hits.clone(),
+            LOCAL_SEMANTIC_BACKEND,
+        )
+        .unwrap();
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node.name, "fallback");
+        assert_eq!(hits[0].match_reason, "fts5");
     }
 }

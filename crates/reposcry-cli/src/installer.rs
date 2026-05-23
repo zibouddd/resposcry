@@ -200,27 +200,13 @@ pub fn install_platform(
     let mut summary = InstallSummary::default();
     install_common_files(repo_root, platform, options, &mut summary)?;
     match platform {
-        InstallPlatform::Claude => {
-            install_claude(repo_root, false, options, &mut summary)?
-        }
-        InstallPlatform::Windows => {
-            install_claude(repo_root, true, options, &mut summary)?
-        }
-        InstallPlatform::Codex => {
-            install_agents_md(repo_root, platform, options, &mut summary)?
-        }
-        InstallPlatform::Opencode => {
-            install_opencode(repo_root, options, &mut summary)?
-        }
-        InstallPlatform::Copilot => {
-            install_copilot(repo_root, options, &mut summary)?
-        }
-        InstallPlatform::Vscode => {
-            install_vscode(repo_root, options, &mut summary)?
-        }
-        InstallPlatform::Aider => {
-            install_aider(repo_root, options, &mut summary)?
-        }
+        InstallPlatform::Claude => install_claude(repo_root, false, options, &mut summary)?,
+        InstallPlatform::Windows => install_claude(repo_root, true, options, &mut summary)?,
+        InstallPlatform::Codex => install_agents_md(repo_root, platform, options, &mut summary)?,
+        InstallPlatform::Opencode => install_opencode(repo_root, options, &mut summary)?,
+        InstallPlatform::Copilot => install_copilot(repo_root, options, &mut summary)?,
+        InstallPlatform::Vscode => install_vscode(repo_root, options, &mut summary)?,
+        InstallPlatform::Aider => install_aider(repo_root, options, &mut summary)?,
         InstallPlatform::Claw => install_agent_directory(
             repo_root,
             platform,
@@ -249,9 +235,7 @@ pub fn install_platform(
             options,
             &mut summary,
         )?,
-        InstallPlatform::Gemini => {
-            install_gemini(repo_root, options, &mut summary)?
-        }
+        InstallPlatform::Gemini => install_gemini(repo_root, options, &mut summary)?,
         InstallPlatform::Hermes => install_agent_directory(
             repo_root,
             platform,
@@ -266,9 +250,7 @@ pub fn install_platform(
             options,
             &mut summary,
         )?,
-        InstallPlatform::Kiro => {
-            install_kiro(repo_root, options, &mut summary)?
-        }
+        InstallPlatform::Kiro => install_kiro(repo_root, options, &mut summary)?,
         InstallPlatform::Pi => install_agent_directory(
             repo_root,
             platform,
@@ -276,9 +258,7 @@ pub fn install_platform(
             options,
             &mut summary,
         )?,
-        InstallPlatform::Cursor => {
-            install_cursor(repo_root, options, &mut summary)?
-        }
+        InstallPlatform::Cursor => install_cursor(repo_root, options, &mut summary)?,
         InstallPlatform::Antigravity => install_agent_directory(
             repo_root,
             platform,
@@ -286,9 +266,7 @@ pub fn install_platform(
             options,
             &mut summary,
         )?,
-        InstallPlatform::Hooks => {
-            install_hooks(repo_root, options, &mut summary)?
-        }
+        InstallPlatform::Hooks => install_hooks(repo_root, options, &mut summary)?,
         InstallPlatform::All => unreachable!(),
     }
     Ok(summary)
@@ -611,17 +589,11 @@ fn write_file(
             return Ok(());
         }
         if !options.force {
-            summary.record(
-                relative_path,
-                InstallActionTaken::SkippedExisting,
-            );
+            summary.record(relative_path, InstallActionTaken::SkippedExisting);
             return Ok(());
         }
         if options.dry_run {
-            summary.record(
-                relative_path,
-                InstallActionTaken::DryRunUpdate,
-            );
+            summary.record(relative_path, InstallActionTaken::DryRunUpdate);
             return Ok(());
         }
         if let Some(parent) = path.parent() {
@@ -633,10 +605,7 @@ fn write_file(
         return Ok(());
     }
     if options.dry_run {
-        summary.record(
-            relative_path,
-            InstallActionTaken::DryRunCreate,
-        );
+        summary.record(relative_path, InstallActionTaken::DryRunCreate);
         return Ok(());
     }
     if let Some(parent) = path.parent() {
@@ -653,10 +622,8 @@ fn make_executable_if_script(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let is_shell_script =
-            path.extension().and_then(|ext| ext.to_str()) == Some("sh");
-        let is_git_hook =
-            path.file_name().and_then(|name| name.to_str()) == Some("pre-commit");
+        let is_shell_script = path.extension().and_then(|ext| ext.to_str()) == Some("sh");
+        let is_git_hook = path.file_name().and_then(|name| name.to_str()) == Some("pre-commit");
         if is_shell_script || is_git_hook {
             let mut permissions = std::fs::metadata(path)?.permissions();
             permissions.set_mode(0o755);
@@ -684,9 +651,7 @@ fn upsert_marked_block(
     } else {
         String::new()
     };
-    let next = if let (Some(start), Some(end_pos)) =
-        (existing.find(&begin), existing.find(&end))
-    {
+    let next = if let (Some(start), Some(end_pos)) = (existing.find(&begin), existing.find(&end)) {
         let after_end = end_pos + end.len();
         format!(
             "{}{}{}",
@@ -742,9 +707,7 @@ fn upsert_hash_marked_block(
     } else {
         String::new()
     };
-    let next = if let (Some(start), Some(end_pos)) =
-        (existing.find(&begin), existing.find(&end))
-    {
+    let next = if let (Some(start), Some(end_pos)) = (existing.find(&begin), existing.find(&end)) {
         let after_end = end_pos + end.len();
         format!(
             "{}{}{}",
@@ -901,7 +864,7 @@ reposcry context "$TASK" --strict --budget 20000 --format markdown > .reposcry/A
 ```
 
 Then read `.reposcry/AI_CONTEXT.md` and inspect dependencies for each planned edit file."#
-    .to_string()
+        .to_string()
 }
 
 fn post_edit_hook() -> String {
@@ -934,7 +897,7 @@ fn shell_validate_script() -> String {
 set -euo pipefail
 BASE="${1:-main...HEAD}"
 reposcry validate "$BASE""#
-    .to_string()
+        .to_string()
 }
 
 fn powershell_context_script() -> String {
@@ -958,7 +921,7 @@ fn powershell_validate_script() -> String {
 )
 $ErrorActionPreference = "Stop"
 reposcry validate $Base"#
-    .to_string()
+        .to_string()
 }
 
 fn gitignore_block() -> &'static str {
@@ -974,7 +937,8 @@ reposcry.db
 
 fn claude_command(kind: &str, windows: bool) -> String {
     let body = match (kind, windows) {
-        ("context", true) => r#"Generate a reposcry context pack for the task in $ARGUMENTS.
+        ("context", true) => {
+            r#"Generate a reposcry context pack for the task in $ARGUMENTS.
 
 Run:
 
@@ -982,8 +946,10 @@ Run:
 ./scripts/reposcry-context.ps1 $ARGUMENTS
 ```
 
-Then read `.reposcry/AI_CONTEXT.md` before editing."#,
-        ("context", false) => r#"Generate a reposcry context pack for the task in $ARGUMENTS.
+Then read `.reposcry/AI_CONTEXT.md` before editing."#
+        }
+        ("context", false) => {
+            r#"Generate a reposcry context pack for the task in $ARGUMENTS.
 
 Run:
 
@@ -991,8 +957,10 @@ Run:
 ./scripts/reposcry-context.sh $ARGUMENTS
 ```
 
-Then read `.reposcry/AI_CONTEXT.md` before editing."#,
-        ("review", true) => r#"Review the current branch using reposcry.
+Then read `.reposcry/AI_CONTEXT.md` before editing."#
+        }
+        ("review", true) => {
+            r#"Review the current branch using reposcry.
 
 Run:
 
@@ -1000,8 +968,10 @@ Run:
 reposcry report main...HEAD --format markdown | Out-File -Encoding UTF8 .reposcry/PR_REVIEW.md
 ```
 
-Read `.reposcry/PR_REVIEW.md` and summarize high-risk changes, impacted files, and tests."#,
-        ("review", false) => r#"Review the current branch using reposcry.
+Read `.reposcry/PR_REVIEW.md` and summarize high-risk changes, impacted files, and tests."#
+        }
+        ("review", false) => {
+            r#"Review the current branch using reposcry.
 
 Run:
 
@@ -1009,8 +979,10 @@ Run:
 reposcry report main...HEAD --format markdown > .reposcry/PR_REVIEW.md
 ```
 
-Read `.reposcry/PR_REVIEW.md` and summarize high-risk changes, impacted files, and tests."#,
-        ("validate", true) => r#"Validate the current branch using reposcry.
+Read `.reposcry/PR_REVIEW.md` and summarize high-risk changes, impacted files, and tests."#
+        }
+        ("validate", true) => {
+            r#"Validate the current branch using reposcry.
 
 Run:
 
@@ -1018,8 +990,10 @@ Run:
 ./scripts/reposcry-validate.ps1 main...HEAD
 ```
 
-Fix or report any dependency cycles, architecture violations, or missing tests."#,
-        _ => r#"Validate the current branch using reposcry.
+Fix or report any dependency cycles, architecture violations, or missing tests."#
+        }
+        _ => {
+            r#"Validate the current branch using reposcry.
 
 Run:
 
@@ -1027,7 +1001,8 @@ Run:
 ./scripts/reposcry-validate.sh main...HEAD
 ```
 
-Fix or report any dependency cycles, architecture violations, or missing tests."#,
+Fix or report any dependency cycles, architecture violations, or missing tests."#
+        }
     };
     body.to_string()
 }

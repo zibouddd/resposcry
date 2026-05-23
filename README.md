@@ -9,10 +9,8 @@ RepoScry is a local code review graph engine for repository indexing, impact ana
 ## Package naming
 
 - Canonical CLI: `reposcry`
-- Compatibility CLI: `reposcry-crg`
-- Full-index helper: `reposcry-index-full`
 
-`reposcry` is the primary user-facing command. The compatibility binaries exist to preserve the CRG and MCP surface while the project converges on one CLI.
+`reposcry` is the primary user-facing command for indexing, graph analysis, CRG-compatible queries, and MCP serving. Compatibility binaries may still exist for migration, but the documented interface is `reposcry`.
 
 ## Install
 
@@ -66,24 +64,24 @@ reposcry validate main
 
 ## Full index workflow
 
-Use the full-index helper when you want one command for an install-time index pass:
+Use the full-index command when you want one command for an install-time index pass:
 
 ```bash
-reposcry-index-full --repo .
+reposcry --repo . index-full
 ```
 
 ## CRG-compatible commands
 
-RepoScry ships a CRG-compatible command surface from `reposcry-crg`:
+RepoScry ships a CRG-compatible command surface directly from `reposcry`:
 
 ```bash
-reposcry-crg --repo . get_architecture_overview --format json
-reposcry-crg --repo . query_graph "callers_of rebuild_graph"
-reposcry-crg --repo . query_graph "tests_for parse_rust"
-reposcry-crg --repo . get_impact_radius rebuild_graph --depth 4
-reposcry-crg --repo . get_affected_flows main HEAD
-reposcry-crg --repo . semantic_search_nodes "cache database calls" --limit 20
-reposcry-crg --repo . refactor_tool rename parse_rust parse_rust_v2
+reposcry --repo . get_architecture_overview --format json
+reposcry --repo . query_graph "callers_of rebuild_graph"
+reposcry --repo . query_graph "tests_for parse_rust"
+reposcry --repo . get_impact_radius rebuild_graph --depth 4
+reposcry --repo . get_affected_flows main HEAD
+reposcry --repo . semantic_search_nodes "cache database calls" --limit 20
+reposcry --repo . refactor_tool rename parse_rust parse_rust_v2
 ```
 
 ## MCP setup
@@ -91,7 +89,7 @@ reposcry-crg --repo . refactor_tool rename parse_rust parse_rust_v2
 Run the MCP-compatible stdio server:
 
 ```bash
-reposcry-crg mcp --repo /path/to/repo
+reposcry mcp --repo /path/to/repo
 ```
 
 Example client configuration:
@@ -100,7 +98,7 @@ Example client configuration:
 {
   "mcpServers": {
     "reposcry": {
-      "command": "reposcry-crg",
+      "command": "reposcry",
       "args": ["mcp", "--repo", "/path/to/repo"]
     }
   }
@@ -157,4 +155,4 @@ Published benchmark notes live in [BENCHMARKS.md](BENCHMARKS.md).
 - Dynamic imports, reflection, and framework runtime behavior are under-approximated.
 - Call resolution still uses heuristics when multiple symbol matches are plausible.
 - Diff-based commands such as `detect_changes main HEAD` inspect git refs, not unstaged working tree edits.
-- The compatibility surface currently spans multiple binaries while the CLI naming converges.
+- Some older examples and wrappers may still mention compatibility binaries; prefer `reposcry`.

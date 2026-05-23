@@ -5,8 +5,7 @@ RepoScry is a local code review graph engine with four main layers.
 ## CLI layer
 
 - `reposcry`: repository indexing, context generation, validation, reporting, and install helpers
-- `reposcry-crg`: CRG-compatible analysis commands plus MCP stdio server
-- `reposcry-index-full`: convenience wrapper for full indexing flows
+- `reposcry`: indexing, context generation, CRG-compatible analysis commands, and MCP stdio server
 
 ## Storage layer
 

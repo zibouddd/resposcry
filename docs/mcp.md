@@ -1,9 +1,9 @@
 # RepoScry MCP
 
-RepoScry exposes a minimal MCP-compatible stdio server from the `reposcry-crg` binary:
+RepoScry exposes a minimal MCP-compatible stdio server from the `reposcry` CLI:
 
 ```bash
-reposcry-crg mcp --repo /path/to/repo
+reposcry mcp --repo /path/to/repo
 ```
 
 Supported MCP methods:
@@ -29,7 +29,7 @@ Supported tools:
 {
   "mcpServers": {
     "reposcry": {
-      "command": "reposcry-crg",
+      "command": "reposcry",
       "args": ["mcp", "--repo", "/path/to/repo"]
     }
   }

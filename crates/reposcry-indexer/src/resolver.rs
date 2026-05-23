@@ -39,8 +39,7 @@ impl TypeScriptImportResolver {
                         let alias_key = key.trim_end_matches("/*");
                         if let Some(first) = val.as_array().and_then(|a| a.first()) {
                             if let Some(path_str) = first.as_str() {
-                                let resolved =
-                                    PathBuf::from(path_str.trim_end_matches("/*"));
+                                let resolved = PathBuf::from(path_str.trim_end_matches("/*"));
                                 self.aliases.insert(alias_key.to_string(), resolved);
                             }
                         }
@@ -85,8 +84,7 @@ pub struct RustImportResolver {
 
 impl RustImportResolver {
     pub fn new(repo_root: &Path) -> Self {
-        let crate_root = find_crate_root(repo_root)
-            .unwrap_or_else(|| repo_root.to_path_buf());
+        let crate_root = find_crate_root(repo_root).unwrap_or_else(|| repo_root.to_path_buf());
         Self {
             _repo_root: repo_root.to_path_buf(),
             crate_root,
@@ -100,9 +98,7 @@ fn find_crate_root(path: &Path) -> Option<PathBuf> {
         if dir.join("Cargo.toml").exists() {
             return Some(dir);
         }
-        if dir.join("src").join("lib.rs").exists()
-            || dir.join("src").join("main.rs").exists()
-        {
+        if dir.join("src").join("lib.rs").exists() || dir.join("src").join("main.rs").exists() {
             return Some(dir);
         }
         current = dir.parent().map(|p| p.to_path_buf());

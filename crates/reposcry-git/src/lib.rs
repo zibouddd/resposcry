@@ -54,8 +54,7 @@ impl GitIntegration {
     }
 
     pub fn diff_files(&self, base: &str, head: &str) -> Result<Vec<GitChange>> {
-        let output = self
-            .run_git(&["diff", "--name-status", &format!("{}...{}", base, head)])?;
+        let output = self.run_git(&["diff", "--name-status", &format!("{}...{}", base, head)])?;
         let mut changes = Vec::new();
         for line in output.lines() {
             if line.is_empty() {
@@ -71,11 +70,7 @@ impl GitIntegration {
                 });
             }
         }
-        let numstat = self.run_git(&[
-            "diff",
-            "--numstat",
-            &format!("{}...{}", base, head),
-        ])?;
+        let numstat = self.run_git(&["diff", "--numstat", &format!("{}...{}", base, head)])?;
         for line in numstat.lines() {
             if line.is_empty() {
                 continue;
@@ -135,9 +130,7 @@ impl GitIntegration {
                     author: current_author.clone(),
                     date: current_date.clone(),
                 });
-            } else if line.len() >= 40
-                && line.chars().take(40).all(|c| c.is_ascii_hexdigit())
-            {
+            } else if line.len() >= 40 && line.chars().take(40).all(|c| c.is_ascii_hexdigit()) {
                 current_hash = line.split(' ').next().unwrap_or("").to_string();
             } else if let Some(author) = line.strip_prefix("author ") {
                 current_author = author.to_string();
@@ -149,11 +142,7 @@ impl GitIntegration {
     }
 
     pub fn changed_files_since(&self, base: &str) -> Result<Vec<String>> {
-        let output = self.run_git(&[
-            "diff",
-            "--name-only",
-            &format!("{}...HEAD", base),
-        ])?;
+        let output = self.run_git(&["diff", "--name-only", &format!("{}...HEAD", base)])?;
         Ok(output
             .lines()
             .map(|l| l.to_string())
@@ -179,12 +168,7 @@ impl GitIntegration {
     }
 
     pub fn file_owner(&self, path: &str) -> Result<String> {
-        let output = self.run_git(&[
-            "shortlog",
-            "-sn",
-            "--",
-            path,
-        ])?;
+        let output = self.run_git(&["shortlog", "-sn", "--", path])?;
         output
             .lines()
             .next()

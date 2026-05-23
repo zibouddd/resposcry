@@ -89,8 +89,7 @@ fn extract_function_signature(node: &tree_sitter::Node, source: &[u8]) -> Option
 }
 
 fn extract_impl_type(node: &tree_sitter::Node, source: &[u8]) -> String {
-    node
-        .child_by_field_name("type")
+    node.child_by_field_name("type")
         .map(|n| node_text(&n, source))
         .unwrap_or_else(|| "unknown".to_string())
 }
@@ -235,7 +234,8 @@ fn collect_rust_items(
             let vis = visibility_from_node(node, source);
             let attr_start = node.start_byte().saturating_sub(256);
             let attrs = std::str::from_utf8(
-                &source[usize::min(attr_start, source.len())..usize::min(node.start_byte(), source.len())],
+                &source[usize::min(attr_start, source.len())
+                    ..usize::min(node.start_byte(), source.len())],
             )
             .unwrap_or("");
             let is_test = attrs.contains("#[test]")
@@ -378,17 +378,41 @@ fn collect_rust_calls(
     match node.kind() {
         "call_expression" => {
             if let Some(function) = node.child_by_field_name("function") {
-                push_call(calls, path, symbols, line, &node_text(&function, source), 0.8, "ast_rust_call");
+                push_call(
+                    calls,
+                    path,
+                    symbols,
+                    line,
+                    &node_text(&function, source),
+                    0.8,
+                    "ast_rust_call",
+                );
             }
         }
         "method_call_expression" => {
             if let Some(method) = node.child_by_field_name("method") {
-                push_call(calls, path, symbols, line, &node_text(&method, source), 0.9, "ast_rust_method");
+                push_call(
+                    calls,
+                    path,
+                    symbols,
+                    line,
+                    &node_text(&method, source),
+                    0.9,
+                    "ast_rust_method",
+                );
             }
         }
         "macro_invocation" => {
             if let Some(macro_node) = node.child_by_field_name("macro") {
-                push_call(calls, path, symbols, line, &node_text(&macro_node, source), 0.7, "ast_rust_macro");
+                push_call(
+                    calls,
+                    path,
+                    symbols,
+                    line,
+                    &node_text(&macro_node, source),
+                    0.7,
+                    "ast_rust_macro",
+                );
             }
         }
         _ => {}
@@ -410,17 +434,41 @@ fn collect_ts_calls(
     match node.kind() {
         "call_expression" => {
             if let Some(function) = node.child_by_field_name("function") {
-                push_call(calls, path, symbols, line, &node_text(&function, source), 0.8, "ast_ts_call");
+                push_call(
+                    calls,
+                    path,
+                    symbols,
+                    line,
+                    &node_text(&function, source),
+                    0.8,
+                    "ast_ts_call",
+                );
             }
         }
         "new_expression" => {
             if let Some(constructor) = node.child_by_field_name("constructor") {
-                push_call(calls, path, symbols, line, &node_text(&constructor, source), 0.7, "ast_ts_new");
+                push_call(
+                    calls,
+                    path,
+                    symbols,
+                    line,
+                    &node_text(&constructor, source),
+                    0.7,
+                    "ast_ts_new",
+                );
             }
         }
         "jsx_opening_element" | "jsx_self_closing_element" => {
             if let Some(name) = node.child_by_field_name("name") {
-                push_call(calls, path, symbols, line, &node_text(&name, source), 0.6, "ast_jsx_component");
+                push_call(
+                    calls,
+                    path,
+                    symbols,
+                    line,
+                    &node_text(&name, source),
+                    0.6,
+                    "ast_jsx_component",
+                );
             }
         }
         _ => {}
@@ -442,11 +490,27 @@ fn collect_py_calls(
     match node.kind() {
         "call" => {
             if let Some(function) = node.child_by_field_name("function") {
-                push_call(calls, path, symbols, line, &node_text(&function, source), 0.8, "ast_py_call");
+                push_call(
+                    calls,
+                    path,
+                    symbols,
+                    line,
+                    &node_text(&function, source),
+                    0.8,
+                    "ast_py_call",
+                );
             }
         }
         "decorator" => {
-            push_call(calls, path, symbols, line, &node_text(node, source), 0.6, "ast_py_decorator");
+            push_call(
+                calls,
+                path,
+                symbols,
+                line,
+                &node_text(node, source),
+                0.6,
+                "ast_py_decorator",
+            );
         }
         _ => {}
     }
@@ -477,7 +541,14 @@ fn parse_rust(path: &str, source: &str) -> ParsedFile {
     let source_bytes = source.as_bytes();
     let mut cursor = root.walk();
     for node in root.children(&mut cursor) {
-        collect_rust_items(&node, source_bytes, path, &mut symbols, &mut imports, &mut tests);
+        collect_rust_items(
+            &node,
+            source_bytes,
+            path,
+            &mut symbols,
+            &mut imports,
+            &mut tests,
+        );
     }
     let mut calls = Vec::new();
     collect_rust_calls(&root, source_bytes, path, &symbols, &mut calls);
@@ -531,8 +602,8 @@ fn parse_typescript(path: &str, source: &str) -> ParsedFile {
             }
             "export_statement" => {
                 if let Some(inner) = find_child(&node, "function_declaration") {
-                    let export_name = node_name(&inner, source_bytes)
-                        .unwrap_or_else(|| "unknown".to_string());
+                    let export_name =
+                        node_name(&inner, source_bytes).unwrap_or_else(|| "unknown".to_string());
                     let export_sig = extract_function_signature(&inner, source_bytes);
                     symbols.push(Symbol {
                         id: None,
@@ -548,18 +619,15 @@ fn parse_typescript(path: &str, source: &str) -> ParsedFile {
                 }
             }
             "function_declaration" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
+                let name = node_name(&node, source_bytes).unwrap_or_else(|| "unknown".to_string());
                 let sig = extract_function_signature(&node, source_bytes);
                 let is_component = name
                     .chars()
                     .next()
                     .map(|c| c.is_uppercase())
                     .unwrap_or(false);
-                let is_handler = matches!(
-                    name.as_str(),
-                    "GET" | "POST" | "PUT" | "DELETE" | "PATCH"
-                );
+                let is_handler =
+                    matches!(name.as_str(), "GET" | "POST" | "PUT" | "DELETE" | "PATCH");
                 let fn_kind = if is_handler {
                     "api_handler"
                 } else if is_component {
@@ -615,8 +683,7 @@ fn parse_typescript(path: &str, source: &str) -> ParsedFile {
                 }
             }
             "class_declaration" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
+                let name = node_name(&node, source_bytes).unwrap_or_else(|| "unknown".to_string());
                 let sig = format!("class {}", name);
                 symbols.push(Symbol {
                     id: None,
@@ -631,8 +698,7 @@ fn parse_typescript(path: &str, source: &str) -> ParsedFile {
                 });
             }
             "interface_declaration" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
+                let name = node_name(&node, source_bytes).unwrap_or_else(|| "unknown".to_string());
                 let sig = format!("interface {}", name);
                 symbols.push(Symbol {
                     id: None,
@@ -647,8 +713,7 @@ fn parse_typescript(path: &str, source: &str) -> ParsedFile {
                 });
             }
             "type_alias_declaration" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
+                let name = node_name(&node, source_bytes).unwrap_or_else(|| "unknown".to_string());
                 let sig = format!("type {}", name);
                 symbols.push(Symbol {
                     id: None,
@@ -715,8 +780,7 @@ fn parse_javascript(path: &str, source: &str) -> ParsedFile {
                 imports.push(extract_ts_import(&node, source_bytes, path));
             }
             "function_declaration" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
+                let name = node_name(&node, source_bytes).unwrap_or_else(|| "unknown".to_string());
                 symbols.push(Symbol {
                     id: None,
                     file_path: path.to_string(),
@@ -789,8 +853,7 @@ fn parse_python(path: &str, source: &str) -> ParsedFile {
                 });
             }
             "function_definition" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
+                let name = node_name(&node, source_bytes).unwrap_or_else(|| "unknown".to_string());
                 let is_test = name.starts_with("test_");
                 let sig = format!("def {}", name);
                 symbols.push(Symbol {
@@ -814,8 +877,7 @@ fn parse_python(path: &str, source: &str) -> ParsedFile {
                 }
             }
             "class_definition" => {
-                let name = node_name(&node, source_bytes)
-                    .unwrap_or_else(|| "unknown".to_string());
+                let name = node_name(&node, source_bytes).unwrap_or_else(|| "unknown".to_string());
                 let sig = format!("class {}", name);
                 symbols.push(Symbol {
                     id: None,
@@ -882,7 +944,10 @@ fn top() {
 }
 "#;
         let parsed = parse_file("src/lib.rs", source).expect("parse rust");
-        assert!(parsed.calls.iter().any(|call| call.caller == "top" && call.callee == "helper"));
+        assert!(parsed
+            .calls
+            .iter()
+            .any(|call| call.caller == "top" && call.callee == "helper"));
     }
 
     #[test]
@@ -895,7 +960,10 @@ export function top() {
 }
 "#;
         let parsed = parse_file("src/app.ts", source).expect("parse typescript");
-        assert!(parsed.calls.iter().any(|call| call.caller == "top" && call.callee == "helper"));
+        assert!(parsed
+            .calls
+            .iter()
+            .any(|call| call.caller == "top" && call.callee == "helper"));
     }
 
     #[test]
@@ -909,7 +977,13 @@ mod tests {
 }
 "#;
         let parsed = parse_file("src/lib.rs", source).expect("parse nested rust tests");
-        assert!(parsed.symbols.iter().any(|symbol| symbol.kind == "test" && symbol.name == "test_parse_rust"));
-        assert!(parsed.tests.iter().any(|test| test.name == "test_parse_rust"));
+        assert!(parsed
+            .symbols
+            .iter()
+            .any(|symbol| symbol.kind == "test" && symbol.name == "test_parse_rust"));
+        assert!(parsed
+            .tests
+            .iter()
+            .any(|test| test.name == "test_parse_rust"));
     }
 }

@@ -1,8 +1,14 @@
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 
+#[allow(dead_code)]
+#[path = "bin/reposcry-crg.rs"]
+mod crg_cli;
 mod installer;
 
 use installer::{install_platform, InstallOptions, InstallPlatform};
@@ -24,6 +30,9 @@ use reposcry_rules::{RulesConfig, RulesEngine};
 const CACHE_DIR: &str = ".reposcry";
 const CACHE_DB: &str = "reposcry.db";
 const IGNORE_FILE: &str = ".reposcryignore";
+const LOCAL_SEMANTIC_BACKEND: &str = "local-hash-v1";
+const LOCAL_SEMANTIC_DIMS: usize = 64;
+const OLLAMA_BACKEND: &str = "ollama";
 
 #[derive(Parser)]
 #[command(name = "reposcry", version, about = "RepoScry — AI context engine")]
@@ -91,17 +100,11 @@ enum Commands {
         language: Option<String>,
     },
     /// Show symbols in a file
-    Symbols {
-        file: String,
-    },
+    Symbols { file: String },
     /// Show file dependencies
-    Deps {
-        file: String,
-    },
+    Deps { file: String },
     /// Show reverse dependencies
-    Rdeps {
-        file: String,
-    },
+    Rdeps { file: String },
     /// Show diff impact
     Diff {
         base: String,
@@ -145,8 +148,101 @@ enum Commands {
         head: String,
     },
     /// Explain a file's role in the graph
-    Explain {
-        file: String,
+    Explain { file: String },
+    /// Run a full indexing pass and emit a JSON summary
+    #[command(name = "index-full", visible_alias = "index_full")]
+    IndexFull {
+        #[arg(long)]
+        preset: Option<String>,
+    },
+    /// Reviewing code changes - gives risk-scored analysis.
+    #[command(name = "detect_changes", visible_alias = "detect-changes")]
+    DetectChanges {
+        base: String,
+        #[arg(default_value = "HEAD")]
+        head: String,
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Need source context for review - token-efficient.
+    #[command(name = "get_review_context", visible_alias = "get-review-context")]
+    GetReviewContext {
+        task: String,
+        #[arg(long, default_value = "20000")]
+        budget: u32,
+        #[arg(long)]
+        strict: bool,
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Understanding blast radius of a file or symbol.
+    #[command(name = "get_impact_radius", visible_alias = "get-impact-radius")]
+    GetImpactRadius {
+        target: String,
+        #[arg(long, default_value = "3")]
+        depth: usize,
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Finding which entrypoint-like execution paths are impacted.
+    #[command(name = "get_affected_flows", visible_alias = "get-affected-flows")]
+    GetAffectedFlows {
+        base: String,
+        #[arg(default_value = "HEAD")]
+        head: String,
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Tracing callers, callees, imports, tests, and dependencies.
+    #[command(name = "query_graph", visible_alias = "query-graph")]
+    QueryGraph {
+        query: String,
+        #[arg(long, default_value_t = false)]
+        no_runtime_calls: bool,
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Finding functions/classes/files by name, path, signature, or keyword.
+    #[command(
+        name = "semantic_search_nodes",
+        visible_alias = "semantic-search-nodes"
+    )]
+    SemanticSearchNodes {
+        query: String,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        #[arg(long, default_value_t = false)]
+        semantic: bool,
+        #[arg(long)]
+        semantic_backend: Option<String>,
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Understanding high-level codebase structure.
+    #[command(
+        name = "get_architecture_overview",
+        visible_alias = "get-architecture-overview"
+    )]
+    GetArchitectureOverview {
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Planning renames, file splits, and dead-code cleanup.
+    #[command(name = "refactor_tool", visible_alias = "refactor-tool")]
+    RefactorTool {
+        #[arg(default_value = "dead-code")]
+        action: String,
+        target: Option<String>,
+        replacement: Option<String>,
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+    /// Run the MCP-compatible stdio server.
+    Mcp {
+        #[arg(long, default_value_t = 1_048_576)]
+        max_request_bytes: usize,
     },
 }
 
@@ -171,8 +267,7 @@ enum RulesAction {
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
@@ -234,9 +329,7 @@ fn main() -> anyhow::Result<()> {
             cmd_index(&repo_root, &reposcry_dir, &db_path, preset.as_deref())
         }
         Commands::Stats => cmd_stats(&db_path),
-        Commands::Files { language } => {
-            cmd_files(&repo_root, &db_path, language)
-        }
+        Commands::Files { language } => cmd_files(&repo_root, &db_path, language),
         Commands::Symbols { file } => cmd_symbols(&db_path, &file),
         Commands::Deps { file } => cmd_deps(&repo_root, &db_path, &file),
         Commands::Rdeps { file } => cmd_rdeps(&repo_root, &db_path, &file),
@@ -257,21 +350,135 @@ fn main() -> anyhow::Result<()> {
             full,
             &format,
         ),
-        Commands::Report {
-            base,
-            head,
+        Commands::Report { base, head, format } => {
+            cmd_report(&repo_root, &db_path, &base, &head, &format)
+        }
+        Commands::Rules { action } => cmd_rules(&repo_root, &db_path, action),
+        Commands::Validate { base, head } => cmd_validate(&repo_root, &db_path, &base, &head),
+        Commands::Explain { file } => cmd_explain(&repo_root, &db_path, &file),
+        Commands::IndexFull { preset } => {
+            cmd_index_full(&repo_root, &reposcry_dir, &db_path, preset.as_deref())
+        }
+        Commands::DetectChanges { base, head, format } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::DetectChanges { base, head, format },
+        ),
+        Commands::GetReviewContext {
+            task,
+            budget,
+            strict,
             format,
-        } => cmd_report(&repo_root, &db_path, &base, &head, &format),
-        Commands::Rules { action } => {
-            cmd_rules(&repo_root, &db_path, action)
-        }
-        Commands::Validate { base, head } => {
-            cmd_validate(&repo_root, &db_path, &base, &head)
-        }
-        Commands::Explain { file } => {
-            cmd_explain(&repo_root, &db_path, &file)
-        }
+        } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::GetReviewContext {
+                task,
+                budget,
+                strict,
+                format,
+            },
+        ),
+        Commands::GetImpactRadius {
+            target,
+            depth,
+            format,
+        } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::GetImpactRadius {
+                target,
+                depth,
+                format,
+            },
+        ),
+        Commands::GetAffectedFlows { base, head, format } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::GetAffectedFlows { base, head, format },
+        ),
+        Commands::QueryGraph {
+            query,
+            no_runtime_calls,
+            format,
+        } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::QueryGraph {
+                query,
+                no_runtime_calls,
+                format,
+            },
+        ),
+        Commands::SemanticSearchNodes {
+            query,
+            kind,
+            limit,
+            semantic,
+            semantic_backend,
+            format,
+        } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::SemanticSearchNodes {
+                query,
+                kind,
+                limit,
+                semantic,
+                semantic_backend,
+                format,
+            },
+        ),
+        Commands::GetArchitectureOverview { format } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::GetArchitectureOverview { format },
+        ),
+        Commands::RefactorTool {
+            action,
+            target,
+            replacement,
+            format,
+        } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::RefactorTool {
+                action,
+                target,
+                replacement,
+                format,
+            },
+        ),
+        Commands::Mcp { max_request_bytes } => crg_cli::run_command(
+            &repo_root,
+            &db_path,
+            crg_cli::Commands::Mcp { max_request_bytes },
+        ),
     }
+}
+
+#[derive(Debug, Serialize)]
+struct FullIndexStepResult {
+    name: String,
+    ok: bool,
+    detail: String,
+}
+
+#[derive(Debug, Serialize)]
+struct FullIndexSummary {
+    files: i64,
+    symbols: i64,
+    imports: i64,
+    edges: i64,
+    preset: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FullIndexOutput {
+    tool: String,
+    repo: String,
+    steps: Vec<FullIndexStepResult>,
+    summary: FullIndexSummary,
 }
 
 fn ensure_reposcry_dir(reposcry_dir: &Path) -> anyhow::Result<()> {
@@ -281,21 +488,14 @@ fn ensure_reposcry_dir(reposcry_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_init(
-    repo_root: &Path,
-    reposcry_dir: &Path,
-    db_path: &Path,
-) -> anyhow::Result<()> {
+fn cmd_init(repo_root: &Path, reposcry_dir: &Path, db_path: &Path) -> anyhow::Result<()> {
     info!("Initializing RepoScry in {}", repo_root.display());
     ensure_reposcry_dir(reposcry_dir)?;
     // Open database to initialize schema
     let _db = CacheDb::open(db_path)?;
     _db.set_config("repo_root", &repo_root.to_string_lossy())?;
     _db.set_config("version", env!("CARGO_PKG_VERSION"))?;
-    _db.set_config(
-        "initialized_at",
-        &chrono::Utc::now().to_rfc3339(),
-    )?;
+    _db.set_config("initialized_at", &chrono::Utc::now().to_rfc3339())?;
     // Create default ignore file if it doesn't exist
     let ignore_path = repo_root.join(IGNORE_FILE);
     if !ignore_path.exists() {
@@ -373,15 +573,8 @@ fn cmd_install(
         ensure_reposcry_dir(reposcry_dir)?;
         let _db = CacheDb::open(db_path)?;
     }
-    let summary = install_platform(
-        repo_root,
-        platform,
-        InstallOptions { force, dry_run },
-    )?;
-    println!(
-        "Installed RepoScry integration for {}",
-        platform.label()
-    );
+    let summary = install_platform(repo_root, platform, InstallOptions { force, dry_run })?;
+    println!("Installed RepoScry integration for {}", platform.label());
     if dry_run {
         println!("Dry run only. No files were written.");
     }
@@ -436,10 +629,7 @@ fn cmd_index(
         let source = match std::fs::read_to_string(&file.path) {
             Ok(s) => s,
             Err(e) => {
-                warn!(
-                    "Skipping unreadable file {}: {}",
-                    file.relative_path, e
-                );
+                warn!("Skipping unreadable file {}: {}", file.relative_path, e);
                 continue;
             }
         };
@@ -447,8 +637,7 @@ fn cmd_index(
         let cached = db.get_file_by_path(&file.relative_path)?;
         let needs_parse = match cached.as_ref() {
             Some(existing) => {
-                existing.hash != hash
-                    || db.get_call_sites_by_file(existing.id)?.is_empty()
+                existing.hash != hash || db.get_call_sites_by_file(existing.id)?.is_empty()
             }
             None => true,
         };
@@ -475,10 +664,7 @@ fn cmd_index(
                     );
                 }
                 Err(e) => {
-                    warn!(
-                        "Failed to parse {}: {}",
-                        file.relative_path, e
-                    );
+                    warn!("Failed to parse {}: {}", file.relative_path, e);
                     let db_file_id = db.upsert_file(
                         &file.relative_path,
                         &file.language,
@@ -500,10 +686,7 @@ fn cmd_index(
     rebuild_persisted_call_edges(&db)?;
     rebuild_search_index(&db, repo_root)?;
     let preset_name = preset_name.unwrap_or("none");
-    db.set_config(
-        "last_indexed_at",
-        &chrono::Utc::now().to_rfc3339(),
-    )?;
+    db.set_config("last_indexed_at", &chrono::Utc::now().to_rfc3339())?;
     db.set_config("preset", preset_name)?;
     db.set_config("files_count", &files.len().to_string())?;
     info!(
@@ -519,9 +702,42 @@ fn cmd_index(
     Ok(())
 }
 
+fn cmd_index_full(
+    repo_root: &Path,
+    reposcry_dir: &Path,
+    db_path: &Path,
+    preset_name: Option<&str>,
+) -> anyhow::Result<()> {
+    cmd_index(repo_root, reposcry_dir, db_path, preset_name)?;
+    let db = CacheDb::open(db_path)?;
+    let output = FullIndexOutput {
+        tool: "reposcry".to_string(),
+        repo: repo_root.display().to_string(),
+        steps: vec![FullIndexStepResult {
+            name: "index".to_string(),
+            ok: true,
+            detail: "reposcry index completed successfully".to_string(),
+        }],
+        summary: FullIndexSummary {
+            files: db.file_count()?,
+            symbols: db.symbol_count()?,
+            imports: db.import_count()?,
+            edges: db.edge_count()?,
+            preset: preset_name
+                .map(str::to_string)
+                .or_else(|| db.get_config("preset").ok().flatten()),
+        },
+    };
+
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
 fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
     let files = db.get_all_files()?;
     db.clear_search_index()?;
+    let semantic_backend = configured_semantic_backend(db)?;
+    db.clear_search_vectors(None)?;
     for file in &files {
         let imports = db.get_imports_by_file(file.id)?;
         let imports_text = imports
@@ -544,6 +760,15 @@ fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
             &imports_text,
             &source,
         )?;
+        db.insert_search_vector(
+            1_000_000_000_i64 + file.id,
+            &file.path,
+            "file",
+            &file.path,
+            None,
+            semantic_backend.name(),
+            &semantic_backend.embed_text(&format!("{} {} {}", file.path, imports_text, source))?,
+        )?;
         for symbol in db.get_symbols_by_file(file.id)? {
             let Some(symbol_id) = symbol.id else {
                 continue;
@@ -558,9 +783,112 @@ fn rebuild_search_index(db: &CacheDb, repo_root: &Path) -> anyhow::Result<()> {
                 &imports_text,
                 "",
             )?;
+            db.insert_search_vector(
+                symbol_id,
+                &file.path,
+                &symbol.kind,
+                &symbol.name,
+                symbol.signature.as_deref(),
+                semantic_backend.name(),
+                &semantic_backend.embed_text(&format!(
+                    "{} {} {} {}",
+                    symbol.name,
+                    symbol.signature.as_deref().unwrap_or(""),
+                    symbol.doc_comment.as_deref().unwrap_or(""),
+                    imports_text
+                ))?,
+            )?;
         }
     }
+    db.set_config("semantic_backend", semantic_backend.name())?;
     Ok(())
+}
+
+enum SemanticBackend {
+    LocalHash,
+    Ollama { url: String, model: String },
+}
+
+impl SemanticBackend {
+    fn name(&self) -> &str {
+        match self {
+            Self::LocalHash => LOCAL_SEMANTIC_BACKEND,
+            Self::Ollama { .. } => OLLAMA_BACKEND,
+        }
+    }
+
+    fn embed_text(&self, text: &str) -> anyhow::Result<Vec<f32>> {
+        match self {
+            Self::LocalHash => Ok(local_text_embedding(text)),
+            Self::Ollama { url, model } => ollama_embedding(url, model, text),
+        }
+    }
+}
+
+fn configured_semantic_backend(db: &CacheDb) -> anyhow::Result<SemanticBackend> {
+    let backend_name = env::var("REPOSCRY_SEMANTIC_BACKEND")
+        .ok()
+        .or_else(|| db.get_config("semantic_backend").ok().flatten())
+        .unwrap_or_else(|| LOCAL_SEMANTIC_BACKEND.to_string());
+    match backend_name.as_str() {
+        OLLAMA_BACKEND => Ok(SemanticBackend::Ollama {
+            url: env::var("REPOSCRY_OLLAMA_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:11434/api/embeddings".to_string()),
+            model: env::var("REPOSCRY_OLLAMA_MODEL")
+                .unwrap_or_else(|_| "nomic-embed-text".to_string()),
+        }),
+        _ => Ok(SemanticBackend::LocalHash),
+    }
+}
+
+fn local_text_embedding(text: &str) -> Vec<f32> {
+    let mut vector = vec![0.0_f32; LOCAL_SEMANTIC_DIMS];
+    for token in text
+        .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
+        .filter(|token| !token.is_empty())
+    {
+        let token = token.to_lowercase();
+        let hash = blake3::hash(token.as_bytes());
+        let bytes = hash.as_bytes();
+        let bucket = usize::from(bytes[0]) % LOCAL_SEMANTIC_DIMS;
+        let sign = if bytes[1] % 2 == 0 { 1.0 } else { -1.0 };
+        let weight = 1.0 + (f32::from(bytes[2]) / 255.0);
+        vector[bucket] += sign * weight;
+    }
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for value in &mut vector {
+            *value /= norm;
+        }
+    }
+    vector
+}
+
+fn ollama_embedding(url: &str, model: &str, text: &str) -> anyhow::Result<Vec<f32>> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let response = client
+        .post(url)
+        .json(&serde_json::json!({
+            "model": model,
+            "prompt": text,
+        }))
+        .send()?
+        .error_for_status()?;
+    let payload: serde_json::Value = response.json()?;
+    let embedding = payload
+        .get("embedding")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| anyhow::anyhow!("ollama response missing embedding array"))?;
+    let vector = embedding
+        .iter()
+        .map(|value| value.as_f64().unwrap_or_default() as f32)
+        .collect::<Vec<_>>();
+    if vector.is_empty() {
+        return Err(anyhow::anyhow!("ollama returned an empty embedding"));
+    }
+    Ok(vector)
 }
 
 fn rebuild_persisted_import_edges(db: &CacheDb) -> anyhow::Result<()> {
@@ -569,9 +897,7 @@ fn rebuild_persisted_import_edges(db: &CacheDb) -> anyhow::Result<()> {
     for file in &files {
         let imports = db.get_imports_by_file(file.id)?;
         for import in imports {
-            if let Some(target_path) =
-                resolve_import_target(&file.path, &import.target, &files)
-            {
+            if let Some(target_path) = resolve_import_target(&file.path, &import.target, &files) {
                 if let Some(target_file) =
                     files.iter().find(|candidate| candidate.path == target_path)
                 {
@@ -643,14 +969,22 @@ fn rebuild_persisted_call_edges(db: &CacheDb) -> anyhow::Result<()> {
                 source_file_id: file.id,
                 target_file_id: target_symbol
                     .id
-                    .and_then(|_| files.iter().find(|f| f.path == target_symbol.file_path).map(|f| f.id))
+                    .and_then(|_| {
+                        files
+                            .iter()
+                            .find(|f| f.path == target_symbol.file_path)
+                            .map(|f| f.id)
+                    })
                     .unwrap_or(file.id),
                 kind: EdgeKind::Calls.as_str().to_string(),
                 line: call_site.line,
                 confidence: call_site.confidence,
                 resolution_strategy: Some(strategy),
             });
-            if let Some(target_file) = files.iter().find(|candidate| candidate.path == target_symbol.file_path) {
+            if let Some(target_file) = files
+                .iter()
+                .find(|candidate| candidate.path == target_symbol.file_path)
+            {
                 file_edges.insert((file.id, target_file.id));
             }
         }
@@ -684,7 +1018,9 @@ fn resolve_caller_symbol<'a>(
         .or_else(|| {
             file_symbols
                 .iter()
-                .filter(|symbol| symbol.start_line <= call_site.line && symbol.end_line >= call_site.line)
+                .filter(|symbol| {
+                    symbol.start_line <= call_site.line && symbol.end_line >= call_site.line
+                })
                 .min_by_key(|symbol| symbol.end_line.saturating_sub(symbol.start_line))
         })
 }
@@ -694,10 +1030,10 @@ fn resolve_callee_symbol(
     global_symbol_candidates: &HashMap<String, Vec<reposcry_graph::symbol::Symbol>>,
     call_site: &CachedCallSite,
 ) -> Option<(reposcry_graph::symbol::Symbol, String)> {
-    if let Some(symbol) = file_symbols
-        .iter()
-        .find(|symbol| symbol.name == call_site.callee || symbol.name.rsplit("::").next() == Some(call_site.callee.as_str()))
-    {
+    if let Some(symbol) = file_symbols.iter().find(|symbol| {
+        symbol.name == call_site.callee
+            || symbol.name.rsplit("::").next() == Some(call_site.callee.as_str())
+    }) {
         return Some((symbol.clone(), "same_file".to_string()));
     }
     let candidates = global_symbol_candidates.get(&call_site.callee)?;
@@ -720,8 +1056,7 @@ fn resolve_import_target(
     if raw_target.is_empty() {
         return None;
     }
-    let file_paths: HashSet<&str> =
-        files.iter().map(|file| file.path.as_str()).collect();
+    let file_paths: HashSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
 
     if raw_target.starts_with('.') {
         let parent = Path::new(source_path)
@@ -828,10 +1163,7 @@ fn rust_src_root_for(source_path: &str) -> Option<String> {
     }
 }
 
-fn find_candidate_path(
-    base: &str,
-    file_paths: &HashSet<&str>,
-) -> Option<String> {
+fn find_candidate_path(base: &str, file_paths: &HashSet<&str>) -> Option<String> {
     let normalized = normalize_slashes(base.trim_matches('/'));
     let candidates = candidate_paths(&normalized);
     candidates
@@ -869,9 +1201,7 @@ fn normalize_relative_path(path: PathBuf) -> String {
                 parts.pop();
             }
             Component::CurDir => {}
-            Component::Normal(part) => {
-                parts.push(part.to_string_lossy().to_string())
-            }
+            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
             _ => {}
         }
     }
@@ -902,11 +1232,7 @@ fn cmd_stats(db_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_files(
-    _repo_root: &Path,
-    db_path: &Path,
-    language: Option<String>,
-) -> anyhow::Result<()> {
+fn cmd_files(_repo_root: &Path, db_path: &Path, language: Option<String>) -> anyhow::Result<()> {
     let db = CacheDb::open(db_path)?;
     let files = db.get_all_files()?;
     for file in &files {
@@ -951,11 +1277,7 @@ fn cmd_symbols(db_path: &Path, file: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_deps(
-    _repo_root: &Path,
-    db_path: &Path,
-    file: &str,
-) -> anyhow::Result<()> {
+fn cmd_deps(_repo_root: &Path, db_path: &Path, file: &str) -> anyhow::Result<()> {
     let db = CacheDb::open(db_path)?;
     let graph = rebuild_graph(&db)?;
     let mut deps: Vec<String> = graph
@@ -989,11 +1311,7 @@ fn cmd_deps(
     Ok(())
 }
 
-fn cmd_rdeps(
-    _repo_root: &Path,
-    db_path: &Path,
-    file: &str,
-) -> anyhow::Result<()> {
+fn cmd_rdeps(_repo_root: &Path, db_path: &Path, file: &str) -> anyhow::Result<()> {
     let db = CacheDb::open(db_path)?;
     let graph = rebuild_graph(&db)?;
     let mut rdeps: Vec<String> = graph
@@ -1046,13 +1364,10 @@ fn cmd_diff(repo_root: &Path, base: &str, head: &str) -> anyhow::Result<()> {
         );
     }
     // Impacted files (reverse deps)
-    if let Ok(db) =
-        CacheDb::open(&repo_root.join(CACHE_DIR).join(CACHE_DB))
-    {
+    if let Ok(db) = CacheDb::open(&repo_root.join(CACHE_DIR).join(CACHE_DB)) {
         let graph = rebuild_graph(&db)?;
         let mut impacted = Vec::new();
-        let changed_paths: Vec<&str> =
-            changes.iter().map(|c| c.path.as_str()).collect();
+        let changed_paths: Vec<&str> = changes.iter().map(|c| c.path.as_str()).collect();
         for edge in graph
             .edges
             .iter()
@@ -1144,10 +1459,7 @@ fn cmd_context(
             }
         }
         _ => {
-            let builder = ContextBuilder::new(
-                CodeGraph::new(),
-                ContextConfig::default(),
-            );
+            let builder = ContextBuilder::new(CodeGraph::new(), ContextConfig::default());
             println!("{}", builder.render_markdown(&context));
         }
     }
@@ -1182,11 +1494,7 @@ fn cmd_report(
     Ok(())
 }
 
-fn cmd_rules(
-    _repo_root: &Path,
-    db_path: &Path,
-    action: Option<RulesAction>,
-) -> anyhow::Result<()> {
+fn cmd_rules(_repo_root: &Path, db_path: &Path, action: Option<RulesAction>) -> anyhow::Result<()> {
     let action = action.unwrap_or(RulesAction::Check);
     match action {
         RulesAction::Check => {
@@ -1200,12 +1508,7 @@ fn cmd_rules(
                 println!("No architecture violations found.");
             } else {
                 for v in &violations {
-                    println!(
-                        "[{}] Rule '{}': {}",
-                        v.severity.as_str(),
-                        v.rule,
-                        v.message
-                    );
+                    println!("[{}] Rule '{}': {}", v.severity.as_str(), v.rule, v.message);
                 }
             }
         }
@@ -1213,12 +1516,7 @@ fn cmd_rules(
     Ok(())
 }
 
-fn cmd_validate(
-    repo_root: &Path,
-    db_path: &Path,
-    base: &str,
-    head: &str,
-) -> anyhow::Result<()> {
+fn cmd_validate(repo_root: &Path, db_path: &Path, base: &str, head: &str) -> anyhow::Result<()> {
     let git = GitIntegration::new(repo_root);
     if !git.is_git_repo() {
         warn!("Not a git repository.");
@@ -1229,28 +1527,21 @@ fn cmd_validate(
     let rules_config = RulesConfig::default_rules();
     let rules_engine = RulesEngine::new(rules_config);
     let changes = git.diff_files(base, head)?;
-    let report =
-        generate_report(&graph, &git, &rules_engine, base, head)?;
+    let report = generate_report(&graph, &git, &rules_engine, base, head)?;
     let mut has_errors = false;
     println!("# Validation Report\n");
     if !report.new_cycles.is_empty() {
         has_errors = true;
         println!("## Dependency Cycles\n");
         for cycle in &report.new_cycles {
-            println!(
-                "ERROR: New dependency cycle: {}",
-                cycle.join(" → ")
-            );
+            println!("ERROR: New dependency cycle: {}", cycle.join(" → "));
         }
         println!();
     }
     if !report.high_risk_changes.is_empty() {
         println!("## High-Risk Changes\n");
         for item in &report.high_risk_changes {
-            println!(
-                "WARNING: {} changed — {}",
-                item.file, item.reason
-            );
+            println!("WARNING: {} changed — {}", item.file, item.reason);
         }
         println!();
     }
@@ -1263,15 +1554,11 @@ fn cmd_validate(
         println!();
     }
     // Check for changed files without test changes
-    let changed_paths: Vec<String> =
-        changes.iter().map(|c| c.path.clone()).collect();
+    let changed_paths: Vec<String> = changes.iter().map(|c| c.path.clone()).collect();
     let has_test_changes = changed_paths.iter().any(|p| p.contains("test"));
-    let has_source_changes =
-        changed_paths.iter().any(|p| !p.contains("test"));
+    let has_source_changes = changed_paths.iter().any(|p| !p.contains("test"));
     if has_source_changes && !has_test_changes {
-        println!(
-            "WARNING: Source files changed but no test files modified."
-        );
+        println!("WARNING: Source files changed but no test files modified.");
         println!();
     }
     if !has_errors {
@@ -1280,11 +1567,7 @@ fn cmd_validate(
     Ok(())
 }
 
-fn cmd_explain(
-    _repo_root: &Path,
-    db_path: &Path,
-    file: &str,
-) -> anyhow::Result<()> {
+fn cmd_explain(_repo_root: &Path, db_path: &Path, file: &str) -> anyhow::Result<()> {
     let db = CacheDb::open(db_path)?;
     let graph = rebuild_graph(&db)?;
     let nodes: Vec<_> = graph
@@ -1300,10 +1583,7 @@ fn cmd_explain(
     // File-level info
     if let Some(cached) = db.get_file_by_path(file)? {
         println!("Language: {}", cached.language);
-        println!(
-            "Size: {} bytes, {} lines",
-            cached.size_bytes, cached.loc
-        );
+        println!("Size: {} bytes, {} lines", cached.size_bytes, cached.loc);
         println!("Last indexed: {}", cached.last_indexed_at);
     }
     println!();
@@ -1421,24 +1701,16 @@ fn rebuild_graph(db: &CacheDb) -> anyhow::Result<CodeGraph> {
         }
     }
     for cached_edge in db.get_edges_by_kind(EdgeKind::Imports)? {
-        let Some(&source_graph_id) =
-            db_file_to_graph_node.get(&cached_edge.source_file_id)
-        else {
+        let Some(&source_graph_id) = db_file_to_graph_node.get(&cached_edge.source_file_id) else {
             continue;
         };
         let Some(target_file_id) = cached_edge.target_file_id else {
             continue;
         };
-        let Some(&target_graph_id) =
-            db_file_to_graph_node.get(&target_file_id)
-        else {
+        let Some(&target_graph_id) = db_file_to_graph_node.get(&target_file_id) else {
             continue;
         };
-        graph.add_edge(
-            source_graph_id,
-            target_graph_id,
-            EdgeKind::Imports,
-        );
+        graph.add_edge(source_graph_id, target_graph_id, EdgeKind::Imports);
     }
     Ok(graph)
 }
@@ -1466,22 +1738,14 @@ mod tests {
             file(1, "src/components/button.tsx"),
             file(2, "src/lib/theme.ts"),
         ];
-        let resolved = resolve_import_target(
-            "src/components/button.tsx",
-            "../lib/theme",
-            &files,
-        );
+        let resolved = resolve_import_target("src/components/button.tsx", "../lib/theme", &files);
         assert_eq!(resolved.as_deref(), Some("src/lib/theme.ts"));
     }
 
     #[test]
     fn resolves_alias_typescript_import() {
         let files = vec![file(1, "src/lib/theme.ts")];
-        let resolved = resolve_import_target(
-            "src/components/button.tsx",
-            "@/lib/theme",
-            &files,
-        );
+        let resolved = resolve_import_target("src/components/button.tsx", "@/lib/theme", &files);
         assert_eq!(resolved.as_deref(), Some("src/lib/theme.ts"));
     }
 
