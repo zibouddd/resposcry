@@ -16,8 +16,10 @@ jobs:
         run: cargo check --workspace --all-targets
       - name: Test
         run: cargo test --workspace --all-targets
-      - name: Index
-        run: cargo run -p reposcry-cli --bin reposcry -- index
+      - name: Fast index
+        run: cargo run -p reposcry-cli --bin reposcry -- index --no-semantic
+      - name: Incremental update
+        run: cargo run -p reposcry-cli --bin reposcry-update -- --file README.md --refresh-search --skip-warm-calls
       - name: Validate
         run: cargo run -p reposcry-cli --bin reposcry -- validate main
       - name: README smoke
