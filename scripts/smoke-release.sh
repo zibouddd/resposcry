@@ -44,7 +44,7 @@ cp "$ROOT_DIR/target/release/reposcry-update" "$DIST_DIR/reposcry-update"
 ASSET="reposcry-${target}.tar.gz"
 ASSET_PATH="$TMP_ROOT/$ASSET"
 tar -czf "$ASSET_PATH" -C "$DIST_DIR" reposcry reposcry-update
-sha256sum "$ASSET_PATH" > "$ASSET_PATH.sha256"
+shasum -a 256 "$ASSET_PATH" > "$ASSET_PATH.sha256"
 
 export REPOSCRY_RELEASE_BASE_URL="file://$TMP_ROOT"
 export REPOSCRY_INSTALL_DIR="$INSTALL_DIR"
