@@ -149,7 +149,7 @@ fn list_symbols(db: &CacheDb, args: &Value) -> Result<Value> {
                 continue;
             }
             symbols.push(json!({
-                "file": file.path,
+                "file": file.path.clone(),
                 "name": symbol.name,
                 "kind": symbol.kind,
                 "start_line": symbol.start_line,
