@@ -32,15 +32,16 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build release binaries
-        run: cargo build --release -p reposcry-cli --target ${{ matrix.target }}
+        run: cargo build --release -p reposcry-cli --bins --target ${{ matrix.target }}
       - name: Package release (unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/reposcry dist/reposcry
-          tar -czf reposcry-${{ matrix.target }}.tar.gz -C dist reposcry
-      - name: Verify packaged binary (unix)
+          cp target/${{ matrix.target }}/release/reposcry-update dist/reposcry-update
+          tar -czf reposcry-${{ matrix.target }}.tar.gz -C dist reposcry reposcry-update
+      - name: Verify packaged binaries (unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -48,31 +49,39 @@ jobs:
           mkdir -p verify-dist
           tar -xzf reposcry-${{ matrix.target }}.tar.gz -C verify-dist
           ./verify-dist/reposcry --version
-      - name: Verify install.sh contract (unix)
+          ./verify-dist/reposcry-update --version
+      - name: Generate checksums (unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           sha256sum reposcry-${{ matrix.target }}.tar.gz > reposcry-${{ matrix.target }}.tar.gz.sha256
+      - name: Verify install.sh contract (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
           export REPOSCRY_RELEASE_BASE_URL="file://$PWD"
           export REPOSCRY_INSTALL_DIR="$PWD/install-check"
           export REPOSCRY_OS="$(uname -s)"
           export REPOSCRY_ARCH="$(uname -m)"
           bash ./install.sh
           "$PWD/install-check/reposcry" --version
+          "$PWD/install-check/reposcry-update" --version
       - name: Package release (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/${{ matrix.target }}/release/reposcry.exe dist/reposcry.exe
-          Compress-Archive -Path dist/reposcry.exe -DestinationPath reposcry-${{ matrix.target }}.zip
-      - name: Verify packaged binary (windows)
+          Copy-Item target/${{ matrix.target }}/release/reposcry-update.exe dist/reposcry-update.exe
+          Compress-Archive -Path dist/reposcry.exe, dist/reposcry-update.exe -DestinationPath reposcry-${{ matrix.target }}.zip
+      - name: Verify packaged binaries (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force verify-dist -ErrorAction SilentlyContinue
           Expand-Archive -Path reposcry-${{ matrix.target }}.zip -DestinationPath verify-dist
           .\verify-dist\reposcry.exe --version
+          .\verify-dist\reposcry-update.exe --version
       - name: Generate checksums (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -92,11 +101,7 @@ jobs:
           $env:REPOSCRY_ARCH = $env:PROCESSOR_ARCHITECTURE
           .\install.ps1
           & (Join-Path $installDir 'reposcry.exe') --version
-      - name: Generate checksums (unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          sha256sum reposcry-${{ matrix.target }}.tar.gz > reposcry-${{ matrix.target }}.tar.gz.sha256
+          & (Join-Path $installDir 'reposcry-update.exe') --version
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
