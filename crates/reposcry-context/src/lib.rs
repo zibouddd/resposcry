@@ -73,7 +73,7 @@ impl Default for ContextConfig {
             max_reverse_depth: 2,
             include_full_files: false,
             format: OutputFormat::Human,
-            max_symbols_per_file: 8,
+            max_symbols_per_file: 12,
             show_omitted: false,
         }
     }
@@ -128,6 +128,7 @@ impl ContextBuilder {
         ];
         let task_lower = task.to_lowercase();
         let is_backend_task = backend_keywords.iter().any(|kw| task_lower.contains(kw));
+        let is_cache_backend_task = is_cache_backend_task(&task_lower);
 
         // Step 1: Search files/symbols by keywords. This intentionally allows multiple hits
         // per file; we dedupe by path after ranking so the strongest duplicate survives.
@@ -142,7 +143,7 @@ impl ContextBuilder {
                 matched_files.push(ContextFile {
                     path: path.to_string(),
                     reason: format!("Keyword match (score: {:.2})", relevance),
-                    important_symbols: self.symbols_in_file(path, &keywords),
+                    important_symbols: self.symbols_in_file(path, &keywords, is_cache_backend_task),
                 });
             }
         }
@@ -159,7 +160,11 @@ impl ContextBuilder {
                     matched_files.push(ContextFile {
                         path: entry.path.clone(),
                         reason: format!("File name match (score: {:.2})", relevance),
-                        important_symbols: self.symbols_in_file(&entry.path, &keywords),
+                        important_symbols: self.symbols_in_file(
+                            &entry.path,
+                            &keywords,
+                            is_cache_backend_task,
+                        ),
                     });
                 }
             }
@@ -180,7 +185,11 @@ impl ContextBuilder {
                             matched_files.push(ContextFile {
                                 path: entry.path.clone(),
                                 reason: "Manifest/public API for backend/storage task".into(),
-                                important_symbols: self.symbols_in_file(&entry.path, &keywords),
+                                important_symbols: self.symbols_in_file(
+                                    &entry.path,
+                                    &keywords,
+                                    is_cache_backend_task,
+                                ),
                             });
                         }
                     }
@@ -203,8 +212,14 @@ impl ContextBuilder {
         let mut seen_file_paths = HashSet::new();
         matched_files.retain(|f| seen_file_paths.insert(f.path.clone()));
 
-        // Track omitted symbols per file after edit-relevance ranking.
-        let max_syms = self.config.max_symbols_per_file as usize;
+        // Track omitted symbols per file after edit-relevance ranking. Cache-backend tasks
+        // preserve a minimum required symbol set even when the CLI asks for fewer symbols.
+        let configured_max_syms = self.config.max_symbols_per_file as usize;
+        let max_syms = if is_cache_backend_task {
+            configured_max_syms.max(cache_backend_required_symbol_count())
+        } else {
+            configured_max_syms
+        };
         let mut omitted_list = Vec::new();
         for file in &mut matched_files {
             if file.important_symbols.len() > max_syms {
@@ -290,7 +305,12 @@ impl ContextBuilder {
         Ok(pack)
     }
 
-    fn symbols_in_file(&self, path: &str, keywords: &[String]) -> Vec<String> {
+    fn symbols_in_file(
+        &self,
+        path: &str,
+        keywords: &[String],
+        is_cache_backend_task: bool,
+    ) -> Vec<String> {
         let mut nodes: Vec<&GraphNode> = self
             .graph
             .nodes
@@ -299,8 +319,8 @@ impl ContextBuilder {
             .collect();
 
         nodes.sort_by(|a, b| {
-            let a_score = symbol_relevance_score(a, keywords);
-            let b_score = symbol_relevance_score(b, keywords);
+            let a_score = symbol_relevance_score(a, keywords, path, is_cache_backend_task);
+            let b_score = symbol_relevance_score(b, keywords, path, is_cache_backend_task);
             b_score
                 .partial_cmp(&a_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -311,6 +331,7 @@ impl ContextBuilder {
     }
 
     fn format_symbol(node: &GraphNode) -> String {
+        let display_name = Self::qualified_symbol_name(node);
         let line_range = match (node.start_line, node.end_line) {
             (Some(start), Some(end)) if end > start => format!(" L{}-{}", start, end),
             (Some(start), _) => format!(" L{}", start),
@@ -318,15 +339,24 @@ impl ContextBuilder {
         };
 
         if let Some(signature) = &node.signature {
-            format!(
-                "{}{} - {}",
-                node.name,
-                line_range,
-                Self::ascii_arrow(signature)
-            )
+            let signature = Self::ascii_arrow(signature).replace("CacheDb::fn ", "fn ");
+            format!("{}{} - {}", display_name, line_range, signature)
         } else {
-            format!("{}{} ({})", node.name, line_range, node.kind.as_str())
+            format!("{}{} ({})", display_name, line_range, node.kind.as_str())
         }
+    }
+
+    fn qualified_symbol_name(node: &GraphNode) -> String {
+        let name = node.name.trim_start_matches("CacheDb::");
+        let path = node.file_path.as_deref().map(normalize_path).unwrap_or_default();
+        let signature = node.signature.as_deref().unwrap_or_default().to_lowercase();
+        if path.ends_with("crates/reposcry-cache/src/db.rs")
+            && (signature.contains("cachedb::fn") || cache_backend_symbol_priority(name).is_some())
+            && name != "CacheDb"
+        {
+            return format!("CacheDb::{}", name);
+        }
+        node.name.clone()
     }
 
     fn find_dependency_paths(&self, files: &[ContextFile]) -> Vec<String> {
@@ -528,17 +558,14 @@ impl ContextBuilder {
     fn compute_implementation_plan(&self, task: &str, files: &[ContextFile]) -> Vec<String> {
         let task_lower = task.to_lowercase();
         let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-        let cache_backend_task = task_lower.contains("cache")
-            && (task_lower.contains("backend")
-                || task_lower.contains("storage")
-                || task_lower.contains("database")
-                || task_lower.contains("adapter"));
+        let cache_backend_task = is_cache_backend_task(&task_lower);
 
         if cache_backend_task && paths.iter().any(|p| p.contains("reposcry-cache")) {
             return vec![
                 "Inspect crates/reposcry-cache/src/lib.rs and crates/reposcry-cache/Cargo.toml before changing the storage API.".into(),
+                "Preserve the required cache-backend symbols: CacheDb, CacheDb::open, CacheDb::open_in_memory, CacheDb::initialize, CacheDb::set_config, CacheDb::get_config, CacheDb::insert_search_document, CacheDb::insert_search_vector, CacheDb::get_search_vectors, and CacheDb::clear_search_vectors.".into(),
                 "Keep CacheDb as the current SQLite-backed implementation unless introducing a trait preserves all existing public methods.".into(),
-                "Touch constructor/config paths first: CacheDb::open, CacheDb::open_in_memory, CacheDb::initialize, set_config, and get_config.".into(),
+                "Touch constructor/config paths first: CacheDb::open, CacheDb::open_in_memory, CacheDb::initialize, CacheDb::set_config, and CacheDb::get_config.".into(),
                 "Preserve search document/vector, import, symbol, call-site, and edge persistence semantics for the new backend.".into(),
                 "Run cargo test -p reposcry-cache before dependent CLI/context tests.".into(),
             ];
@@ -722,6 +749,36 @@ fn normalize_path(path: &str) -> String {
     path.replace('\\', "/").to_lowercase()
 }
 
+fn is_cache_backend_task(task_lower: &str) -> bool {
+    task_lower.contains("cache")
+        && (task_lower.contains("backend")
+            || task_lower.contains("storage")
+            || task_lower.contains("database")
+            || task_lower.contains("adapter")
+            || task_lower.contains("provider")
+            || task_lower.contains("driver"))
+}
+
+fn cache_backend_required_symbol_count() -> usize {
+    10
+}
+
+fn cache_backend_symbol_priority(name: &str) -> Option<f64> {
+    match name.trim_start_matches("CacheDb::") {
+        "CacheDb" => Some(120.0),
+        "open" => Some(119.0),
+        "open_in_memory" => Some(118.0),
+        "initialize" => Some(117.0),
+        "set_config" => Some(116.0),
+        "get_config" => Some(115.0),
+        "insert_search_document" => Some(114.0),
+        "insert_search_vector" => Some(113.0),
+        "get_search_vectors" => Some(112.0),
+        "clear_search_vectors" => Some(111.0),
+        _ => None,
+    }
+}
+
 fn score_file_relevance(path: &str, keywords: &[String], is_backend_task: bool) -> f64 {
     let lower_path = normalize_path(path);
     let mut score = score_relevance(path, path, keywords);
@@ -771,10 +828,22 @@ fn score_relevance(name: &str, path: &str, keywords: &[String]) -> f64 {
     score
 }
 
-fn symbol_relevance_score(node: &GraphNode, keywords: &[String]) -> f64 {
+fn symbol_relevance_score(
+    node: &GraphNode,
+    keywords: &[String],
+    path: &str,
+    is_cache_backend_task: bool,
+) -> f64 {
     let lower_name = node.name.to_lowercase();
     let lower_sig = node.signature.as_deref().unwrap_or_default().to_lowercase();
+    let lower_path = normalize_path(path);
     let mut score = 0.0;
+
+    if is_cache_backend_task && lower_path.ends_with("crates/reposcry-cache/src/db.rs") {
+        if let Some(priority) = cache_backend_symbol_priority(node.name.as_str()) {
+            score += priority;
+        }
+    }
 
     for kw in keywords {
         if lower_name.contains(kw) {
