@@ -31,8 +31,11 @@ jobs:
           ./target/debug/reposcry-export --format json --output .reposcry/graph.json
           ./target/debug/reposcry-export --format graphml --output .reposcry/graph.graphml
           ./target/debug/reposcry-export --format html --output .reposcry/graph.html
-      - name: MCP plus version
-        run: ./target/debug/reposcry-mcp-plus --version
+      - name: MCP plus smoke
+        run: |
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_graph_summary","arguments":{}}}' | ./target/debug/reposcry-mcp-plus --repo . > .reposcry/mcp-plus-smoke.jsonl
+          grep 'reposcry-mcp-plus' .reposcry/mcp-plus-smoke.jsonl
+          grep 'get_graph_summary' .reposcry/mcp-plus-smoke.jsonl
       - name: Validate
         run: ./target/debug/reposcry validate main
       - name: README smoke
