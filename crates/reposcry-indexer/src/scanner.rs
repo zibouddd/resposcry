@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use ignore::WalkBuilder;
+use reposcry_graph::language::Language;
 use tracing::{debug, info, warn};
 
 use crate::preset::IndexPreset;
@@ -113,21 +114,14 @@ impl FileScanner {
     }
 
     fn language_from_path(path: &Path) -> String {
-        match path.extension().and_then(|e| e.to_str()) {
-            Some("rs") => "rust",
-            Some("ts") | Some("tsx") => "typescript",
-            Some("js") | Some("jsx") => "javascript",
-            Some("py") => "python",
-            Some("json") => "json",
-            Some("toml") => "toml",
-            Some("yaml") | Some("yml") => "yaml",
-            Some("md") => "markdown",
-            Some("css") => "css",
-            Some("html") => "html",
-            Some("sql") => "sql",
-            _ => "",
+        let path_str = path.to_string_lossy().replace('\\', "/");
+        let language = Language::from_extension(&path_str);
+        let language_id = language.as_str();
+        if language_id == "unknown" {
+            String::new()
+        } else {
+            language_id.to_string()
         }
-        .to_string()
     }
 
     pub fn scan(&self) -> Result<Vec<ScannedFile>> {
