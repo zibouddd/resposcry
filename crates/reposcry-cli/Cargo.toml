@@ -3,6 +3,13 @@ name = "reposcry-cli"
 version = "0.1.0"
 edition = "2021"
 autobins = false
+description = "Rust-native repository graph CLI for AI coding agents."
+license = "MIT"
+repository = "https://github.com/zibouddd/resposcry"
+homepage = "https://github.com/zibouddd/resposcry"
+documentation = "https://docs.rs/reposcry-cli"
+keywords = ["repo", "graph", "mcp", "ai", "cli"]
+categories = ["development-tools"]
 
 [[bin]]
 name = "reposcry"
@@ -25,13 +32,13 @@ name = "reposcry-mcp-plus"
 path = "src/bin/reposcry-mcp-plus.rs"
 
 [dependencies]
-reposcry-graph = { path = "../reposcry-graph" }
-reposcry-indexer = { path = "../reposcry-indexer" }
-reposcry-cache = { path = "../reposcry-cache" }
-reposcry-git = { path = "../reposcry-git" }
-reposcry-context = { path = "../reposcry-context" }
-reposcry-rules = { path = "../reposcry-rules" }
-reposcry-report = { path = "../reposcry-report" }
+reposcry-graph = { version = "0.1.0", path = "../reposcry-graph" }
+reposcry-indexer = { version = "0.1.0", path = "../reposcry-indexer" }
+reposcry-cache = { version = "0.1.0", path = "../reposcry-cache" }
+reposcry-git = { version = "0.1.0", path = "../reposcry-git" }
+reposcry-context = { version = "0.1.0", path = "../reposcry-context" }
+reposcry-rules = { version = "0.1.0", path = "../reposcry-rules" }
+reposcry-report = { version = "0.1.0", path = "../reposcry-report" }
 
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
