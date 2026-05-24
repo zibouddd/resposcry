@@ -54,7 +54,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          sha256sum reposcry-${{ matrix.target }}.tar.gz > reposcry-${{ matrix.target }}.tar.gz.sha256
+          shasum -a 256 reposcry-${{ matrix.target }}.tar.gz > reposcry-${{ matrix.target }}.tar.gz.sha256
       - name: Verify install.sh contract (unix)
         if: runner.os != 'Windows'
         shell: bash
