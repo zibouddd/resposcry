@@ -127,11 +127,11 @@ enum Commands {
         #[arg(default_value = "HEAD")]
         head: String,
     },
-    /// Generate AI context pack
+    /// Generate AI context pack (default: compact 4k budget)
     Context {
         task: String,
-        /// Token budget
-        #[arg(long, default_value = "20000")]
+        /// Token budget (default: 4000 compact, 8000 deep, 20000 full)
+        #[arg(long, default_value = "4000")]
         budget: u32,
         /// Strict mode
         #[arg(long)]
@@ -142,6 +142,12 @@ enum Commands {
         /// Output format (human, markdown, json)
         #[arg(long, default_value = "markdown")]
         format: String,
+        /// Max symbols per file (default: 8)
+        #[arg(long, default_value = "8")]
+        max_symbols_per_file: u32,
+        /// Show count of omitted symbols per file
+        #[arg(long)]
+        show_omitted: bool,
     },
     /// Generate PR review report
     Report {
@@ -209,7 +215,7 @@ enum Commands {
     #[command(name = "get_review_context", visible_alias = "get-review-context")]
     GetReviewContext {
         task: String,
-        #[arg(long, default_value = "20000")]
+        #[arg(long, default_value = "4000")]
         budget: u32,
         #[arg(long)]
         strict: bool,
@@ -394,6 +400,8 @@ fn main() -> anyhow::Result<()> {
             strict,
             full,
             format,
+            max_symbols_per_file,
+            show_omitted,
         } => cmd_context(
             &repo_root,
             &reposcry_dir,
@@ -403,6 +411,8 @@ fn main() -> anyhow::Result<()> {
             strict,
             full,
             &format,
+            max_symbols_per_file,
+            show_omitted,
         ),
         Commands::Report { base, head, format } => {
             cmd_report(&repo_root, &db_path, &base, &head, &format)
@@ -681,7 +691,9 @@ fn cmd_install(
     println!();
     println!("Next commands:");
     println!("  reposcry index");
-    println!("  reposcry context \"your task\" --strict --budget 20000");
+    println!("  reposcry context \"your task\"                # compact (4k budget)");
+    println!("  reposcry context \"your task\" --budget 8000  # deep");
+    println!("  reposcry context \"your task\" --budget 20000 # diagnostic/full");
     println!("  reposcry validate main...HEAD");
     Ok(())
 }
@@ -1847,6 +1859,8 @@ fn cmd_context(
     strict: bool,
     full: bool,
     format: &str,
+    max_symbols_per_file: u32,
+    show_omitted: bool,
 ) -> anyhow::Result<()> {
     ensure_reposcry_dir(reposcry_dir)?;
     let db = CacheDb::open(db_path)?;
@@ -1864,6 +1878,8 @@ fn cmd_context(
         max_reverse_depth: 2,
         include_full_files: full,
         format: output_fmt,
+        max_symbols_per_file,
+        show_omitted,
     };
     let context = ContextBuilder::new(graph, config)
         .with_cache(db)
@@ -1890,7 +1906,7 @@ fn cmd_context(
             println!();
             println!("Confidence: {:?}", context.confidence);
             for warning in &context.strict_warnings {
-                println!("  ⚠ {}", warning);
+                println!("  [!] {}", warning);
             }
         }
         _ => {

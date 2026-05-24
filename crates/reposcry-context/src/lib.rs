@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -20,6 +22,13 @@ pub struct ContextPack {
     pub architecture_rules: Vec<String>,
     pub confidence: Confidence,
     pub strict_warnings: Vec<String>,
+    pub omitted_symbols: Vec<OmittedSymbols>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OmittedSymbols {
+    pub path: String,
+    pub omitted_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,17 +59,21 @@ pub struct ContextConfig {
     pub max_reverse_depth: u32,
     pub include_full_files: bool,
     pub format: OutputFormat,
+    pub max_symbols_per_file: u32,
+    pub show_omitted: bool,
 }
 
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
-            token_budget: 20_000,
+            token_budget: 4_000,
             strict_mode: false,
             max_files: 30,
             max_reverse_depth: 2,
             include_full_files: false,
             format: OutputFormat::Human,
+            max_symbols_per_file: 8,
+            show_omitted: false,
         }
     }
 }
@@ -141,6 +154,32 @@ impl ContextBuilder {
                 }
             }
         }
+
+        // Step 1b: Force-include manifests for backend/storage tasks
+        let backend_keywords = ["backend", "storage", "database", "cache", "provider",
+                                "driver", "adapter", "plugin", "feature"];
+        let is_backend_task = backend_keywords.iter().any(|kw| task.to_lowercase().contains(kw));
+        if is_backend_task {
+            if let Some(ref cache) = self.cache {
+                for entry in cache.get_all_files()? {
+                    let is_manifest = entry.path.ends_with("Cargo.toml")
+                        || entry.path.ends_with("package.json")
+                        || entry.path.contains("lib.rs")
+                        || entry.path.contains("mod.rs");
+                    if is_manifest && !matched_files.iter().any(|f| f.path == entry.path) {
+                        let manifest_relevance = score_relevance(&entry.path, &entry.path, &keywords);
+                        if manifest_relevance > 0.0 || entry.path.contains("reposcry-cache") {
+                            matched_files.push(ContextFile {
+                                path: entry.path.clone(),
+                                reason: "Manifest for backend/storage task".into(),
+                                important_symbols: self.symbols_in_file(&entry.path),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         // Sort by relevance
         matched_files.sort_by(|a, b| {
             let a_score = score_relevance(&a.path, &a.path, &keywords);
@@ -149,7 +188,21 @@ impl ContextBuilder {
                 .partial_cmp(&a_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        matched_files.dedup_by(|a, b| a.path == b.path);
+
+        // Track omitted symbols per file
+        let max_syms = self.config.max_symbols_per_file as usize;
+        let mut omitted_list = Vec::new();
+        for file in &mut matched_files {
+            if file.important_symbols.len() > max_syms {
+                let omitted_count = file.important_symbols.len() as u32 - max_syms as u32;
+                file.important_symbols.truncate(max_syms);
+                omitted_list.push(OmittedSymbols {
+                    path: file.path.clone(),
+                    omitted_count,
+                });
+            }
+        }
+
         let max_by_budget = (self.config.token_budget / 750).clamp(4, self.config.max_files);
         matched_files.truncate(max_by_budget as usize);
 
@@ -163,12 +216,9 @@ impl ContextBuilder {
         // Step 5: Risk warnings
         let risk_warnings = self.compute_risk_warnings(&matched_files);
 
-        // Step 6: Architecture rules
-        let architecture_rules = vec![
-            "UI components should not directly query database.".into(),
-            "Filter state should be serializable.".into(),
-            "Backend defaults should not contradict frontend empty-state.".into(),
-        ];
+        // Step 6: Architecture rules — filter by matched file paths
+        let matched_paths: HashSet<&str> = matched_files.iter().map(|f| f.path.as_str()).collect();
+        let architecture_rules = self.compute_architecture_rules(&matched_paths);
 
         // Step 7: Determine confidence
         let confidence = if matched_files.is_empty() {
@@ -202,14 +252,16 @@ impl ContextBuilder {
             }
         }
 
-        // Build read order
+        // Build read order (deduped)
         let mut suggested_read_order: Vec<String> =
             matched_files.iter().map(|f| f.path.clone()).collect();
+        suggested_read_order.sort();
+        suggested_read_order.dedup();
         if suggested_read_order.len() > 10 {
             suggested_read_order.truncate(10);
         }
 
-        Ok(ContextPack {
+        let mut pack = ContextPack {
             user_task: task.to_string(),
             relevant_files: matched_files,
             dependency_paths,
@@ -220,7 +272,10 @@ impl ContextBuilder {
             architecture_rules,
             confidence,
             strict_warnings,
-        })
+            omitted_symbols: if self.config.show_omitted { omitted_list } else { vec![] },
+        };
+        pack.dedupe();
+        Ok(pack)
     }
 
     fn symbols_in_file(&self, path: &str) -> Vec<String> {
@@ -230,7 +285,7 @@ impl ContextBuilder {
             .filter(|n| n.file_path.as_deref() == Some(path) && n.kind != NodeKind::File)
             .map(|n| {
                 if let Some(signature) = &n.signature {
-                    format!("{} — {}", n.name, signature)
+                    format!("{} - {}", n.name, Self::ascii_arrow(signature))
                 } else {
                     n.name.clone()
                 }
@@ -305,8 +360,18 @@ impl ContextBuilder {
     }
 
     fn find_tests(&self, ctx_files: &[ContextFile]) -> Vec<String> {
-        let _ = ctx_files;
-        let mut tests: Vec<String> = self
+        // Collect relevant crate names from matched files
+        let matched_crates: HashSet<String> = ctx_files
+            .iter()
+            .filter_map(|f| {
+                f.path
+                    .split('/')
+                    .find(|segment| segment.starts_with("reposcry-"))
+                    .map(|c| c.to_string())
+            })
+            .collect();
+
+        let all_tests: Vec<(String, u32)> = self
             .graph
             .nodes
             .values()
@@ -314,7 +379,24 @@ impl ContextBuilder {
                 n.kind == NodeKind::Test
                     && n.file_path.as_deref().map_or(false, |p| p.contains("test"))
             })
-            .filter_map(|n| n.file_path.clone())
+            .filter_map(|n| {
+                let path = n.file_path.clone()?;
+                let crate_match = matched_crates.iter().find(|c| path.contains(c.as_str()));
+                let priority: u32 = if crate_match.is_some() {
+                    0 // same crate = highest priority
+                } else if path.contains("fixtures") || path.contains("benchmarks") {
+                    2 // fixture tests = lowest priority
+                } else {
+                    1 // other crate tests
+                };
+                Some((path, priority))
+            })
+            .collect();
+
+        let mut tests: Vec<String> = all_tests
+            .into_iter()
+            .filter(|(_, p)| *p == 0) // same-crate tests first
+            .map(|(p, _)| p)
             .collect();
         tests.sort();
         tests.dedup();
@@ -322,21 +404,12 @@ impl ContextBuilder {
     }
 
     fn compute_risk_warnings(&self, files: &[ContextFile]) -> Vec<String> {
+        let mut seen_paths = HashSet::new();
         let mut warnings = Vec::new();
         for file in files {
-            let deps = self
-                .graph
-                .edges
-                .iter()
-                .filter(|e| e.kind == EdgeKind::Imports)
-                .filter(|e| {
-                    self.graph
-                        .nodes
-                        .get(&e.source_id)
-                        .and_then(|n| n.file_path.as_deref())
-                        == Some(&file.path)
-                })
-                .count();
+            if !seen_paths.insert(file.path.clone()) {
+                continue;
+            }
             let rdeps = self
                 .graph
                 .edges
@@ -356,6 +429,19 @@ impl ContextBuilder {
                     file.path, rdeps
                 ));
             }
+            let deps = self
+                .graph
+                .edges
+                .iter()
+                .filter(|e| e.kind == EdgeKind::Imports)
+                .filter(|e| {
+                    self.graph
+                        .nodes
+                        .get(&e.source_id)
+                        .and_then(|n| n.file_path.as_deref())
+                        == Some(&file.path)
+                })
+                .count();
             if deps > 10 {
                 warnings.push(format!(
                     "`{}` has high fan-out ({} dependencies). May be doing too much.",
@@ -366,18 +452,56 @@ impl ContextBuilder {
         warnings
     }
 
+    fn compute_architecture_rules(&self, matched_paths: &HashSet<&str>) -> Vec<String> {
+        let mut rules = Vec::new();
+
+        let has_cache_files = matched_paths.iter().any(|p| p.contains("reposcry-cache"));
+        if has_cache_files {
+            rules.push("Cache backend changes must preserve existing SQLite CacheDb behavior.".into());
+            rules.push("New backends must maintain search index, import, symbol, and call-site semantics.".into());
+        }
+
+        let has_cli_files = matched_paths.iter().any(|p| p.contains("reposcry-cli"));
+        if has_cli_files {
+            rules.push("CLI commands should prefer the crg_cli module for complex output formatting.".into());
+        }
+
+        let has_context_files = matched_paths.iter().any(|p| p.contains("reposcry-context") || p.contains("reposcry-graph"));
+        if has_context_files {
+            rules.push("Context pack changes must preserve backward compatibility of the ContextPack JSON schema.".into());
+        }
+
+        rules
+    }
+
+    fn ascii_arrow(s: &str) -> String {
+        s.replace('\u{2014}', "-")
+         .replace('\u{2013}', "-")
+         .replace('\u{2192}', "->")
+         .replace('\u{2190}', "<-")
+         .replace('\u{2713}', "[ok]")
+         .replace('\u{2717}', "[no]")
+         .replace('\u{26a0}', "[!]")
+         .replace('\u{2018}', "'")
+         .replace('\u{2019}', "'")
+         .replace('\u{201c}', "\"")
+         .replace('\u{201d}', "\"")
+    }
+
     pub fn render_markdown(&self, pack: &ContextPack) -> String {
         let mut md = String::new();
         md.push_str("# AI Context Pack\n\n");
-        md.push_str(&format!("## User task\n\n{}\n\n", pack.user_task));
+        md.push_str("## User task\n\n");
+        md.push_str(&Self::ascii_arrow(&pack.user_task));
+        md.push_str("\n\n");
         md.push_str("## Relevant files\n\n");
         for file in &pack.relevant_files {
             md.push_str(&format!("### {}\n", file.path));
-            md.push_str(&format!("Reason: {}\n", file.reason));
+            md.push_str(&format!("Reason: {}\n", Self::ascii_arrow(&file.reason)));
             if !file.important_symbols.is_empty() {
                 md.push_str("Important symbols:\n");
                 for sym in &file.important_symbols {
-                    md.push_str(&format!("- {}\n", sym));
+                    md.push_str(&format!("- {}\n", Self::ascii_arrow(sym)));
                 }
             }
             md.push('\n');
@@ -385,7 +509,8 @@ impl ContextBuilder {
         if !pack.dependency_paths.is_empty() {
             md.push_str("## Dependency paths\n\n");
             for path in &pack.dependency_paths {
-                md.push_str(&format!("{}\n", path));
+                md.push_str(&Self::ascii_arrow(path));
+                md.push('\n');
             }
             md.push('\n');
         }
@@ -406,7 +531,7 @@ impl ContextBuilder {
             }
             md.push('\n');
         }
-        md.push_str(&format!("## Suggested files to read before editing\n\n"));
+        md.push_str("## Suggested files to read before editing\n\n");
         for (i, file) in pack.suggested_read_order.iter().enumerate() {
             md.push_str(&format!("{}. {}\n", i + 1, file));
         }
@@ -421,9 +546,9 @@ impl ContextBuilder {
         md.push_str(&format!(
             "## Confidence\n\n{}\n\n",
             match pack.confidence {
-                Confidence::High => "HIGH ✓",
-                Confidence::Medium => "MEDIUM ⚠",
-                Confidence::Low => "LOW ✗",
+                Confidence::High => "HIGH",
+                Confidence::Medium => "MEDIUM",
+                Confidence::Low => "LOW",
             }
         ));
         if !pack.strict_warnings.is_empty() {
@@ -436,11 +561,54 @@ impl ContextBuilder {
         if !pack.architecture_rules.is_empty() {
             md.push_str("## Architecture rules\n\n");
             for rule in &pack.architecture_rules {
-                md.push_str(&format!("- {}\n", rule));
+                md.push_str(&format!("- {}\n", Self::ascii_arrow(rule)));
             }
             md.push('\n');
         }
         md
+    }
+}
+
+impl ContextPack {
+    /// Deduplicate all fields by path, symbol text, warning text, etc.
+    pub fn dedupe(&mut self) {
+        // Deduplicate relevant files by path (already mostly done, but be safe)
+        let mut seen_paths = HashSet::new();
+        self.relevant_files.retain(|f| seen_paths.insert(f.path.clone()));
+
+        // Deduplicate symbols within each file
+        for file in &mut self.relevant_files {
+            let mut seen_syms = HashSet::new();
+            file.important_symbols.retain(|s| seen_syms.insert(s.clone()));
+        }
+
+        // Deduplicate dependency paths
+        let mut seen_deps = HashSet::new();
+        self.dependency_paths.retain(|p| seen_deps.insert(p.clone()));
+
+        // Deduplicate reverse dependency entries
+        let mut seen_rd = HashSet::new();
+        self.reverse_dependencies.retain(|rd| seen_rd.insert(rd.path.clone()));
+        for rd in &mut self.reverse_dependencies {
+            let mut seen_users = HashSet::new();
+            rd.used_by.retain(|u| seen_users.insert(u.clone()));
+        }
+
+        // Deduplicate risk warnings
+        let mut seen_warnings = HashSet::new();
+        self.risk_warnings.retain(|w| seen_warnings.insert(w.clone()));
+
+        // Deduplicate suggested read order
+        let mut seen_read = HashSet::new();
+        self.suggested_read_order.retain(|r| seen_read.insert(r.clone()));
+
+        // Deduplicate suggested tests
+        let mut seen_tests = HashSet::new();
+        self.suggested_tests.retain(|t| seen_tests.insert(t.clone()));
+
+        // Deduplicate architecture rules
+        let mut seen_rules = HashSet::new();
+        self.architecture_rules.retain(|r| seen_rules.insert(r.clone()));
     }
 }
 

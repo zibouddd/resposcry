@@ -713,6 +713,8 @@ fn review_context_value(
         max_reverse_depth: 2,
         include_full_files: false,
         format: OutputFormat::Json,
+        max_symbols_per_file: 8,
+        show_omitted: false,
     };
     let context = ContextBuilder::new(graph, config)
         .with_cache(db)
