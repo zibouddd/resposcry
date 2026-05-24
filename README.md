@@ -4,18 +4,21 @@
 [![Release](https://github.com/zibouddd/resposcry/actions/workflows/release.yml/badge.svg)](https://github.com/zibouddd/resposcry/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-RepoScry is a local code review graph engine for repository indexing, impact analysis, AI context generation, CRG-compatible queries, and MCP tool serving.
+RepoScry is a local code review graph engine for repository indexing, impact analysis, AI context generation, CRG-compatible queries, graph export, watch-mode updates, and MCP tool serving.
 
 The default workflow is optimized for AI coding agents: keep a fast lexical/code graph hot, update changed files incrementally, and run semantic/vector refresh only when needed.
 
 ## Binaries
 
-RepoScry ships two CLI binaries:
+RepoScry ships multiple CLI binaries:
 
 | Binary | Purpose |
 | --- | --- |
-| `reposcry` | Full repository graph, context, report, validation, search, MCP, and CRG-compatible command surface. |
+| `reposcry` | Main CLI for indexing, graph analysis, context packs, reports, validation, search, MCP, and CRG-compatible commands. |
 | `reposcry-update` | Fast incremental updater for changed files or explicit file paths. Intended for edit loops and hooks. |
+| `reposcry-watch` | Polling watch mode that runs incremental updates when Git reports changed files. |
+| `reposcry-export` | Exports the cached graph as JSON, GraphML, or a lightweight HTML report. |
+| `reposcry-mcp-plus` | Expanded read-only MCP server for graph inspection tools. |
 
 ## Install
 
@@ -25,7 +28,7 @@ RepoScry ships two CLI binaries:
 curl -fsSL https://raw.githubusercontent.com/zibouddd/resposcry/main/install.sh | bash
 ```
 
-The installer downloads the release archive, verifies its SHA-256 checksum, and installs both `reposcry` and `reposcry-update`.
+The installer downloads the release archive, verifies its SHA-256 checksum, and installs all RepoScry binaries.
 
 Pin a tagged release:
 
@@ -75,6 +78,18 @@ Update explicit files instead of asking Git for a diff:
 reposcry-update --file crates/reposcry-cli/src/main.rs --refresh-search
 ```
 
+Run a polling watch loop during an editor or agent session:
+
+```bash
+reposcry-watch --repo . --base main --refresh-search --skip-warm-calls
+```
+
+Run one watch iteration for hooks or CI:
+
+```bash
+reposcry-watch --repo . --once --json
+```
+
 Useful incremental flags:
 
 | Flag | Effect |
@@ -84,6 +99,16 @@ Useful incremental flags:
 | `--base <ref>` | Diff base for `--changed`. Defaults to `HEAD`. Use `main` for branch work. |
 | `--skip-warm-calls` | Skip call-edge warmup for the fastest possible update. |
 | `--refresh-search` | Rebuild lexical search documents after the file update. Semantic vectors are not rebuilt. |
+
+Helper scripts:
+
+```bash
+./scripts/reposcry-watch.sh main
+```
+
+```powershell
+./scripts/reposcry-watch.ps1 main
+```
 
 ## Full index workflow
 
@@ -100,6 +125,28 @@ reposcry --repo . stats
 ```bash
 reposcry --repo . index-full --no-semantic
 ```
+
+## Graph export
+
+Export the cached graph after indexing:
+
+```bash
+reposcry-export --repo . --format json --output .reposcry/graph.json
+reposcry-export --repo . --format graphml --output .reposcry/graph.graphml
+reposcry-export --repo . --format html --output .reposcry/graph.html
+```
+
+Include symbol nodes and symbol-level calls:
+
+```bash
+reposcry-export --repo . --format json --symbols --output .reposcry/graph-symbols.json
+```
+
+## Language support
+
+RepoScry recognizes a broad language matrix. Rust, TypeScript/TSX, JavaScript/JSX, Python, JSON, TOML, and YAML have the current parser support. Additional languages are indexed at file/path/LOC/language level until parser extraction is added.
+
+See [docs/language-support.md](docs/language-support.md).
 
 ## Semantic refresh is separate
 
@@ -163,10 +210,16 @@ Generated integrations instruct agents to:
 
 ## MCP setup
 
-Run the MCP-compatible stdio server:
+Run the CRG-compatible MCP stdio server:
 
 ```bash
 reposcry --repo /path/to/repo mcp
+```
+
+Run the expanded read-only MCP-plus server:
+
+```bash
+reposcry-mcp-plus --repo /path/to/repo
 ```
 
 Example client configuration:
@@ -177,6 +230,10 @@ Example client configuration:
     "reposcry": {
       "command": "reposcry",
       "args": ["--repo", "/path/to/repo", "mcp"]
+    },
+    "reposcry-plus": {
+      "command": "reposcry-mcp-plus",
+      "args": ["--repo", "/path/to/repo"]
     }
   }
 }
@@ -187,6 +244,15 @@ Supported MCP methods:
 - `initialize`
 - `tools/list`
 - `tools/call`
+
+`reposcry-mcp-plus` tools:
+
+- `get_graph_summary`
+- `list_languages`
+- `list_files`
+- `list_symbols`
+- `get_file_neighborhood`
+- `export_graph_json`
 
 ## What gets indexed
 
@@ -262,6 +328,17 @@ benchmarks/out/latest-code-review-graph-compare.json
 
 Published notes live in [BENCHMARKS.md](BENCHMARKS.md).
 
+## Release
+
+Create a tagged release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow packages all binaries and publishes checksums.
+
 ## Release smoke
 
 Run the local release/install smoke path with:
@@ -282,11 +359,13 @@ On Windows:
 - [docs/mcp.md](docs/mcp.md)
 - [docs/benchmarks.md](docs/benchmarks.md)
 - [docs/code-review-graph-compat.md](docs/code-review-graph-compat.md)
+- [docs/language-support.md](docs/language-support.md)
 
 ## Limitations
 
 - Dynamic imports, reflection, and framework runtime behavior are under-approximated.
 - Call resolution still uses heuristics when multiple symbol matches are plausible.
+- Newly recognized languages without parser support are indexed at file/path/LOC/language level only.
 - Diff-based commands such as `detect_changes main HEAD` inspect git refs, not unstaged working tree edits.
 - Heavy semantic backends such as Candle/Qwen3 can be slow on first run because model download and vector generation are outside the fast edit loop.
 - End-to-end release publication requires a tagged GitHub release workflow run.
