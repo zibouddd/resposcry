@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 TMP_ROOT="$(mktemp -d)"
 DIST_DIR="$TMP_ROOT/dist"
 INSTALL_DIR="$TMP_ROOT/install-check"
+BINS=(reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus)
 
 cleanup() {
   rm -rf "$TMP_ROOT"
@@ -29,7 +30,7 @@ else
   esac
 fi
 
-for bin in reposcry reposcry-update; do
+for bin in "${BINS[@]}"; do
   release_bin="$ROOT_DIR/target/release/$bin"
   if [[ ! -x "$release_bin" ]]; then
     echo "Release binary was not produced at $release_bin" >&2
@@ -38,19 +39,20 @@ for bin in reposcry reposcry-update; do
 done
 
 mkdir -p "$DIST_DIR"
-cp "$ROOT_DIR/target/release/reposcry" "$DIST_DIR/reposcry"
-cp "$ROOT_DIR/target/release/reposcry-update" "$DIST_DIR/reposcry-update"
+for bin in "${BINS[@]}"; do
+  cp "$ROOT_DIR/target/release/$bin" "$DIST_DIR/$bin"
+done
 
 ASSET="reposcry-${target}.tar.gz"
 ASSET_PATH="$TMP_ROOT/$ASSET"
-tar -czf "$ASSET_PATH" -C "$DIST_DIR" reposcry reposcry-update
+tar -czf "$ASSET_PATH" -C "$DIST_DIR" "${BINS[@]}"
 shasum -a 256 "$ASSET_PATH" > "$ASSET_PATH.sha256"
 
 export REPOSCRY_RELEASE_BASE_URL="file://$TMP_ROOT"
 export REPOSCRY_INSTALL_DIR="$INSTALL_DIR"
 bash ./install.sh >/dev/null
 
-for bin in reposcry reposcry-update; do
+for bin in "${BINS[@]}"; do
   installed="$INSTALL_DIR/$bin"
   if [[ ! -x "$installed" ]]; then
     echo "Installed $bin was not found" >&2
