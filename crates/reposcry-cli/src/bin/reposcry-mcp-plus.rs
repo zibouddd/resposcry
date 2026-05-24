@@ -16,15 +16,14 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let repo_root = PathBuf::from(&cli.repo_root).canonicalize()?;
-    let status = sibling_binary("reposcry")
-        .args([
-            "--repo",
-            &repo_root.display().to_string(),
-            "mcp",
-            "--max-request-bytes",
-            &cli.max_request_bytes.to_string(),
-        ])
-        .status()?;
+    let args = vec![
+        "--repo".to_string(),
+        repo_root.display().to_string(),
+        "mcp".to_string(),
+        "--max-request-bytes".to_string(),
+        cli.max_request_bytes.to_string(),
+    ];
+    let status = sibling_binary("reposcry").args(args).status()?;
     if !status.success() {
         anyhow::bail!("reposcry mcp exited with {}", status);
     }
