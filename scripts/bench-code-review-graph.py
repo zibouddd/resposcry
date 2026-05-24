@@ -81,8 +81,9 @@ def default_release_bin(root: Path, name: str) -> Path:
     return root / "target" / "release" / f"{name}{exe_suffix()}"
 
 
-def command_exists(command: str) -> bool:
-    return shutil.which(command) is not None or Path(command).exists()
+def command_exists(command: str, env: dict[str, str] | None = None) -> bool:
+    search_path = None if env is None else env.get("PATH")
+    return shutil.which(command, path=search_path) is not None or Path(command).exists()
 
 
 def run_timed(
@@ -90,12 +91,14 @@ def run_timed(
     command: list[str],
     *,
     cwd: Path,
+    env: dict[str, str] | None = None,
     allow_failure: bool = False,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     proc = subprocess.run(
         command,
         cwd=str(cwd),
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -135,6 +138,13 @@ def ensure_release_binaries(root: Path, skip_cargo_build: bool) -> None:
         cwd=str(root),
         check=True,
     )
+
+
+def command_env_with_repo_bins(reposcry_bin: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    bin_dir = str(reposcry_bin.parent)
+    env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def file_count(repo: Path) -> int:
@@ -178,6 +188,8 @@ def main() -> int:
     if not reposcry_update_bin.exists():
         raise SystemExit(f"reposcry-update binary not found: {reposcry_update_bin}")
 
+    command_env = command_env_with_repo_bins(reposcry_bin)
+
     if not args.no_clean:
         clean_generated_caches(repo)
 
@@ -187,6 +199,7 @@ def main() -> int:
             "reposcry_cold_index_no_semantic",
             [str(reposcry_bin), "--repo", str(repo), "index", "--no-semantic"],
             cwd=repo,
+            env=command_env,
         )
     )
     results.append(
@@ -194,6 +207,7 @@ def main() -> int:
             "reposcry_warm_index_no_semantic",
             [str(reposcry_bin), "--repo", str(repo), "index", "--no-semantic"],
             cwd=repo,
+            env=command_env,
         )
     )
     results.append(
@@ -209,10 +223,11 @@ def main() -> int:
                 "--skip-warm-calls",
             ],
             cwd=repo,
+            env=command_env,
         )
     )
 
-    crg_available = command_exists(args.crg_bin)
+    crg_available = command_exists(args.crg_bin, command_env)
     if crg_available:
         if not args.no_clean:
             for relative in [".code-review-graph", ".code_review_graph", ".crg", ".crg_cache"]:
@@ -225,6 +240,7 @@ def main() -> int:
                     "code_review_graph_build",
                     [args.crg_bin, "build"],
                     cwd=repo,
+                    env=command_env,
                     allow_failure=not args.require_crg,
                 )
             )
