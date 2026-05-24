@@ -341,37 +341,6 @@ git push origin v0.1.0
 
 The release workflow packages all binaries and publishes checksums.
 
-## crates.io publishing
-
-Before publishing, make sure every workspace crate has package metadata and versioned internal dependencies.
-
-Recommended dry run order:
-
-```bash
-cargo publish -p reposcry-graph --dry-run
-cargo publish -p reposcry-cache --dry-run
-cargo publish -p reposcry-git --dry-run
-cargo publish -p reposcry-indexer --dry-run
-cargo publish -p reposcry-rules --dry-run
-cargo publish -p reposcry-context --dry-run
-cargo publish -p reposcry-report --dry-run
-cargo publish -p reposcry-cli --dry-run
-```
-
-Publish order:
-
-```bash
-cargo publish -p reposcry-graph
-cargo publish -p reposcry-cache
-cargo publish -p reposcry-git
-cargo publish -p reposcry-indexer
-cargo publish -p reposcry-rules
-cargo publish -p reposcry-context
-cargo publish -p reposcry-report
-cargo publish -p reposcry-cli
-```
-
-GitHub Actions publishing should use a `CRATES_IO_TOKEN` repository secret.
 
 ## Release smoke
 
