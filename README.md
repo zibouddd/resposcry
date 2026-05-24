@@ -32,8 +32,6 @@ The default workflow is optimized for AI coding agents: keep a fast lexical/code
 
 ## Binaries
 
-RepoScry ships multiple CLI binaries:
-
 | Binary | Purpose |
 | --- | --- |
 | `reposcry` | Main CLI for indexing, graph analysis, context packs, reports, validation, search, MCP, and CRG-compatible commands. |
@@ -46,14 +44,10 @@ RepoScry ships multiple CLI binaries:
 
 ### macOS / Linux
 
-Download the installer, inspect it if needed, then run it:
-
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/zibouddd/resposcry/main/install.sh
 bash install.sh
 ```
-
-The installer downloads the release archive, verifies its SHA-256 checksum, and installs all RepoScry binaries.
 
 Pin a tagged release:
 
@@ -63,18 +57,16 @@ REPOSCRY_VERSION=v0.1.0 bash install.sh
 
 ### Windows PowerShell
 
-Download the installer, inspect it if needed, then run it:
-
 ```powershell
 iwr https://raw.githubusercontent.com/zibouddd/resposcry/main/install.ps1 -OutFile install.ps1
-.\install.ps1
+./install.ps1
 ```
 
 Pin a tagged release:
 
 ```powershell
 $env:REPOSCRY_VERSION='v0.1.0'
-.\install.ps1
+./install.ps1
 ```
 
 ### From source
@@ -106,12 +98,6 @@ reposcry-update --changed --base main
 reposcry validate main HEAD
 ```
 
-Update explicit files instead of asking Git for a diff:
-
-```bash
-reposcry-update --file crates/reposcry-cli/src/main.rs --refresh-search
-```
-
 Run a polling watch loop during an editor or agent session:
 
 ```bash
@@ -134,19 +120,7 @@ Useful incremental flags:
 | `--skip-warm-calls` | Skip call-edge warmup for the fastest possible update. |
 | `--refresh-search` | Rebuild lexical search documents after the file update. Semantic vectors are not rebuilt. |
 
-Helper scripts:
-
-```bash
-./scripts/reposcry-watch.sh main
-```
-
-```powershell
-./scripts/reposcry-watch.ps1 main
-```
-
 ## Full index workflow
-
-Use a full index when setting up a repository or after large structural changes.
 
 ```bash
 reposcry --repo . index --no-semantic
@@ -162,17 +136,10 @@ reposcry --repo . index-full --no-semantic
 
 ## Graph export
 
-Export the cached graph after indexing:
-
 ```bash
 reposcry-export --repo . --format json --output .reposcry/graph.json
 reposcry-export --repo . --format graphml --output .reposcry/graph.graphml
 reposcry-export --repo . --format html --output .reposcry/graph.html
-```
-
-Include symbol nodes and symbol-level calls:
-
-```bash
 reposcry-export --repo . --format json --symbols --output .reposcry/graph-symbols.json
 ```
 
@@ -185,13 +152,7 @@ RepoScry recognizes a broad language matrix. The first group has parser-backed e
 | Parser-backed | Rust, TypeScript, TSX, JavaScript, JSX, Python, JSON, TOML, YAML |
 | File-level indexed | Go, Java, C#, C, C++, Kotlin, Swift, PHP, Ruby, Lua, Dart, Scala, Vue, Svelte, Nix, PowerShell, Markdown, CSS, HTML, SQL |
 
-Planned parser priorities:
-
-1. Go
-2. Java
-3. C#
-4. Vue / Svelte
-5. Kotlin / Swift
+Planned parser priorities: Go, Java, C#, Vue/Svelte, Kotlin/Swift.
 
 See [docs/language-support.md](docs/language-support.md).
 
@@ -211,15 +172,7 @@ REPOSCRY_SEMANTIC_BACKEND=fastembed reposcry refresh-search --semantic-backend f
 REPOSCRY_SEMANTIC_BACKEND=candle REPOSCRY_CANDLE_MODEL=qwen3 reposcry refresh-search --semantic-backend candle
 ```
 
-Use `--reembed-all` when you want to discard cached vectors for the selected backend:
-
-```bash
-reposcry refresh-search --semantic-backend fastembed --reembed-all
-```
-
 ## CRG-compatible commands
-
-RepoScry exposes a code-review-graph-compatible command surface:
 
 ```bash
 reposcry --repo . get_architecture_overview --format json
@@ -231,9 +184,11 @@ reposcry --repo . semantic_search_nodes "cache database calls" --limit 20
 reposcry --repo . refactor_tool rename parse_rust parse_rust_v2
 ```
 
-## Agent setup: Codex, Claude, Cursor, Copilot, and more
+## Agent setup
 
-Install project instructions and helper scripts for one platform:
+RepoScry can install project instructions and helper scripts for multiple AI coding tools.
+
+Install one platform:
 
 ```bash
 reposcry install --platform codex
@@ -241,11 +196,42 @@ reposcry install --platform claude
 reposcry install --platform cursor
 ```
 
-Install all supported instruction templates:
+Install every supported template:
 
 ```bash
 reposcry install --platform all
 ```
+
+Install only shared hook/helper scripts:
+
+```bash
+reposcry install --platform hooks
+```
+
+### Supported platforms
+
+| Platform flag | Integration |
+| --- | --- |
+| `codex` | OpenAI Codex / `AGENTS.md` style instructions |
+| `claude` | Claude Code on Linux/macOS |
+| `windows` | Claude Code on Windows |
+| `cursor` | Cursor project rules |
+| `copilot` | GitHub Copilot CLI style instructions |
+| `vscode` | VS Code Copilot Chat project instructions |
+| `opencode` | OpenCode agent instructions |
+| `aider` | Aider project conventions |
+| `gemini` | Gemini CLI / `GEMINI.md` instructions |
+| `kiro` | Kiro steering instructions |
+| `hermes` | Hermes agent instructions |
+| `kimi` | Kimi Code instructions |
+| `pi` | Pi coding agent instructions |
+| `claw` | OpenClaw instructions |
+| `droid` | Factory Droid instructions |
+| `trae` | Trae instructions |
+| `trae-cn` | Trae CN instructions |
+| `antigravity` | Google Antigravity instructions |
+| `hooks` | Local Git/editor hook scripts only |
+| `all` | All supported instruction templates |
 
 Generated integrations instruct agents to:
 
@@ -286,12 +272,6 @@ Example client configuration:
 }
 ```
 
-Supported MCP methods:
-
-- `initialize`
-- `tools/list`
-- `tools/call`
-
 `reposcry-mcp-plus` tools:
 
 - `get_graph_summary`
@@ -312,28 +292,13 @@ Supported MCP methods:
 - local full-text search documents
 - optional semantic vectors
 
-The SQLite cache lives in:
-
-```text
-.reposcry/reposcry.db
-```
+The SQLite cache lives in `.reposcry/reposcry.db`.
 
 ## Semantic backends
 
-Default backend:
-
-- `local-hash-v1`
-
-Additional configured backends:
-
-- `ollama`
-- `fastembed`
-- `candle`
-
-Environment variables:
-
 | Backend | Variables |
 | --- | --- |
+| `local-hash-v1` | default backend |
 | `ollama` | `REPOSCRY_OLLAMA_URL`, `REPOSCRY_OLLAMA_MODEL` |
 | `fastembed` | `REPOSCRY_FASTEMBED_MODEL`, `REPOSCRY_FASTEMBED_CACHE_DIR` |
 | `candle` | `REPOSCRY_CANDLE_MODEL`, `REPOSCRY_CANDLE_REPO`, `REPOSCRY_CANDLE_CACHE_DIR`, `REPOSCRY_CANDLE_MAX_LENGTH` |
@@ -342,50 +307,24 @@ Environment variables:
 
 ## Downloads
 
-RepoScry is distributed through two channels:
-
 | Channel | Purpose |
 | --- | --- |
 | GitHub Releases | Standalone binaries for macOS, Linux, and Windows. |
 | crates.io | Source-based installation through Cargo after crate publication. |
-
-Download badges:
 
 [![GitHub release downloads](https://img.shields.io/github/downloads/zibouddd/resposcry/total.svg)](https://github.com/zibouddd/resposcry/releases)
 [![Crates.io downloads](https://img.shields.io/crates/d/reposcry-cli.svg)](https://crates.io/crates/reposcry-cli)
 
 ## Benchmarks
 
-Run RepoScry local benchmarks:
-
 ```bash
 bash scripts/bench.sh
-```
-
-On Windows:
-
-```powershell
-./scripts/bench.ps1
-```
-
-Compare against `code-review-graph` on the same repository:
-
-```bash
 python scripts/bench-code-review-graph.py --repo .
-```
-
-To require a real `code-review-graph build` run:
-
-```bash
 pipx install code-review-graph
 python scripts/bench-code-review-graph.py --repo . --require-crg
 ```
 
-The comparison runner writes JSON to:
-
-```text
-benchmarks/out/latest-code-review-graph-compare.json
-```
+The comparison runner writes JSON to `benchmarks/out/latest-code-review-graph-compare.json`.
 
 Published notes live in [BENCHMARKS.md](BENCHMARKS.md).
 
@@ -394,8 +333,6 @@ Published notes live in [BENCHMARKS.md](BENCHMARKS.md).
 [![Star History Chart](https://api.star-history.com/svg?repos=zibouddd/resposcry&type=Date)](https://www.star-history.com/#zibouddd/resposcry&Date)
 
 ## Release
-
-Create a tagged release:
 
 ```bash
 git tag v0.1.0
@@ -437,8 +374,6 @@ cargo publish -p reposcry-cli
 GitHub Actions publishing should use a `CRATES_IO_TOKEN` repository secret.
 
 ## Release smoke
-
-Run the local release/install smoke path with:
 
 ```bash
 bash scripts/smoke-release.sh
