@@ -83,7 +83,7 @@ try {
     Expand-Archive -LiteralPath $assetPath -DestinationPath $extractDir -Force
 
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-    foreach ($binaryName in @("reposcry.exe", "reposcry-update.exe")) {
+    foreach ($binaryName in @("reposcry.exe", "reposcry-update.exe", "reposcry-watch.exe", "reposcry-export.exe", "reposcry-mcp-plus.exe")) {
         $binaryPath = Join-Path $extractDir $binaryName
         if (-not (Test-Path $binaryPath)) {
             throw "Archive did not contain $binaryName"
