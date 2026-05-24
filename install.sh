@@ -64,6 +64,12 @@ curl -fsSL "$url" -o "$TMP_DIR/$asset"
 curl -fsSL "$checksum_url" -o "$TMP_DIR/$checksum_asset"
 verify_checksum "$TMP_DIR/$checksum_asset" "$TMP_DIR/$asset"
 tar -xzf "$TMP_DIR/$asset" -C "$TMP_DIR"
-install -m 0755 "$TMP_DIR/reposcry" "$INSTALL_DIR/reposcry"
 
-echo "Installed reposcry to $INSTALL_DIR/reposcry"
+for bin in reposcry reposcry-update; do
+  if [[ ! -f "$TMP_DIR/$bin" ]]; then
+    echo "Archive did not contain $bin" >&2
+    exit 1
+  fi
+  install -m 0755 "$TMP_DIR/$bin" "$INSTALL_DIR/$bin"
+  echo "Installed $bin to $INSTALL_DIR/$bin"
+done

@@ -81,14 +81,17 @@ try {
 
     $extractDir = Join-Path $tmpDir "extract"
     Expand-Archive -LiteralPath $assetPath -DestinationPath $extractDir -Force
-    $binaryPath = Join-Path $extractDir "reposcry.exe"
-    if (-not (Test-Path $binaryPath)) {
-        throw "Archive did not contain reposcry.exe"
-    }
 
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-    Copy-Item -LiteralPath $binaryPath -Destination (Join-Path $installDir "reposcry.exe") -Force
-    Write-Output "Installed reposcry to $(Join-Path $installDir 'reposcry.exe')"
+    foreach ($binaryName in @("reposcry.exe", "reposcry-update.exe")) {
+        $binaryPath = Join-Path $extractDir $binaryName
+        if (-not (Test-Path $binaryPath)) {
+            throw "Archive did not contain $binaryName"
+        }
+        $destination = Join-Path $installDir $binaryName
+        Copy-Item -LiteralPath $binaryPath -Destination $destination -Force
+        Write-Output "Installed $binaryName to $destination"
+    }
 } finally {
     Remove-TempDir
 }

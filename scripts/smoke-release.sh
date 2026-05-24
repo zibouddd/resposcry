@@ -13,7 +13,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cargo build --release -p reposcry-cli --bin reposcry >/dev/null
+cargo build --release -p reposcry-cli --bins >/dev/null
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
   case "$(uname -m)" in
@@ -29,33 +29,38 @@ else
   esac
 fi
 
-RELEASE_BIN="$ROOT_DIR/target/release/reposcry"
-if [[ ! -x "$RELEASE_BIN" ]]; then
-  echo "Release binary was not produced at $RELEASE_BIN" >&2
-  exit 1
-fi
+for bin in reposcry reposcry-update; do
+  release_bin="$ROOT_DIR/target/release/$bin"
+  if [[ ! -x "$release_bin" ]]; then
+    echo "Release binary was not produced at $release_bin" >&2
+    exit 1
+  fi
+done
 
 mkdir -p "$DIST_DIR"
-cp "$RELEASE_BIN" "$DIST_DIR/reposcry"
+cp "$ROOT_DIR/target/release/reposcry" "$DIST_DIR/reposcry"
+cp "$ROOT_DIR/target/release/reposcry-update" "$DIST_DIR/reposcry-update"
 
 ASSET="reposcry-${target}.tar.gz"
 ASSET_PATH="$TMP_ROOT/$ASSET"
-tar -czf "$ASSET_PATH" -C "$DIST_DIR" reposcry
-sha256sum "$ASSET_PATH" > "$ASSET_PATH.sha256"
+tar -czf "$ASSET_PATH" -C "$DIST_DIR" reposcry reposcry-update
+shasum -a 256 "$ASSET_PATH" > "$ASSET_PATH.sha256"
 
 export REPOSCRY_RELEASE_BASE_URL="file://$TMP_ROOT"
 export REPOSCRY_INSTALL_DIR="$INSTALL_DIR"
 bash ./install.sh >/dev/null
 
-if [[ ! -x "$INSTALL_DIR/reposcry" ]]; then
-  echo "Installed reposcry was not found" >&2
-  exit 1
-fi
-
-VERSION_OUTPUT="$("$INSTALL_DIR/reposcry" --version)"
-if [[ "$VERSION_OUTPUT" != reposcry\ * ]]; then
-  echo "Unexpected version output: $VERSION_OUTPUT" >&2
-  exit 1
-fi
+for bin in reposcry reposcry-update; do
+  installed="$INSTALL_DIR/$bin"
+  if [[ ! -x "$installed" ]]; then
+    echo "Installed $bin was not found" >&2
+    exit 1
+  fi
+  VERSION_OUTPUT="$("$installed" --version)"
+  if [[ "$VERSION_OUTPUT" != "$bin"\ * ]]; then
+    echo "Unexpected version output for $bin: $VERSION_OUTPUT" >&2
+    exit 1
+  fi
+done
 
 echo "Release smoke passed"

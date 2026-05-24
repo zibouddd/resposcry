@@ -27,6 +27,36 @@ This file tracks reproducible RepoScry benchmark runs.
 - Fixture inventory lives in [benchmarks/fixtures.json](benchmarks/fixtures.json).
 - Fixture source trees live under [benchmarks/fixtures](benchmarks/fixtures).
 
+## Compare against code-review-graph
+
+Run both tools on the same working tree with:
+
+```bash
+python scripts/bench-code-review-graph.py --repo .
+```
+
+To force a real `code-review-graph build` run and fail if it is missing:
+
+```bash
+pipx install code-review-graph
+python scripts/bench-code-review-graph.py --repo . --require-crg
+```
+
+The comparison runner records:
+
+- `reposcry_cold_index_no_semantic`
+- `reposcry_warm_index_no_semantic`
+- `reposcry_incremental_readme_refresh_search`
+- `code_review_graph_build`
+
+Output is written to:
+
+```text
+benchmarks/out/latest-code-review-graph-compare.json
+```
+
+Use this file when making claims such as “RepoScry is faster than code-review-graph”; do not use theoretical language/runtime arguments alone.
+
 ## Fixtures
 
 - `current_repo`: this repository

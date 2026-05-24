@@ -6,121 +6,126 @@
 
 RepoScry is a local code review graph engine for repository indexing, impact analysis, AI context generation, CRG-compatible queries, and MCP tool serving.
 
-## Package naming
+The default workflow is optimized for AI coding agents: keep a fast lexical/code graph hot, update changed files incrementally, and run semantic/vector refresh only when needed.
 
-- Canonical CLI: `reposcry`
+## Binaries
 
-`reposcry` is the user-facing command for indexing, graph analysis, CRG-compatible queries, and MCP serving.
+RepoScry ships two CLI binaries:
+
+| Binary | Purpose |
+| --- | --- |
+| `reposcry` | Full repository graph, context, report, validation, search, MCP, and CRG-compatible command surface. |
+| `reposcry-update` | Fast incremental updater for changed files or explicit file paths. Intended for edit loops and hooks. |
 
 ## Install
 
-From source:
-
-```bash
-cargo install --path crates/reposcry-cli --force
-```
-
-From release artifact:
+### macOS / Linux
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zibouddd/resposcry/main/install.sh | bash
 ```
 
-The installer downloads the release archive and verifies its SHA-256 checksum before installing `reposcry`.
+The installer downloads the release archive, verifies its SHA-256 checksum, and installs both `reposcry` and `reposcry-update`.
 
-On Windows PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/zibouddd/resposcry/main/install.ps1 | iex
-```
-
-Pin a specific tagged release:
+Pin a tagged release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/zibouddd/resposcry/main/install.sh | REPOSCRY_VERSION=v0.1.0 bash
 ```
 
-Pin a specific tagged release on Windows:
+### Windows PowerShell
+
+```powershell
+irm https://raw.githubusercontent.com/zibouddd/resposcry/main/install.ps1 | iex
+```
+
+Pin a tagged release:
 
 ```powershell
 $env:REPOSCRY_VERSION='v0.1.0'
 irm https://raw.githubusercontent.com/zibouddd/resposcry/main/install.ps1 | iex
 ```
 
-Update an existing source install:
+### From source
 
 ```bash
 cargo install --path crates/reposcry-cli --force
 ```
 
-## Quick start
+## Fast edit loop
 
-Initialize and index the current repository:
+Use this loop during normal coding. It avoids semantic/vector work by default.
 
 ```bash
 reposcry init
-reposcry index
-reposcry warm-calls
-reposcry refresh-search --semantic-backend local-hash-v1
-reposcry stats
-```
-
-Skip semantic vector refresh when you only want a fast lexical/code graph refresh:
-
-```bash
 reposcry index --no-semantic
-```
-
-Build a focused context pack for an editing task:
-
-```bash
 reposcry context "fix dependency graph rebuild" --strict --budget 20000 --format markdown > .reposcry/AI_CONTEXT.md
 ```
 
-Inspect graph impact before editing:
+After editing, update only changed files:
 
 ```bash
-reposcry explain crates/reposcry-cli/src/main.rs
-reposcry deps crates/reposcry-cli/src/main.rs
-reposcry rdeps crates/reposcry-cache/src/db.rs
+reposcry-update --changed --base main
+reposcry validate main HEAD
 ```
 
-Validate after editing:
+Update explicit files instead of asking Git for a diff:
 
 ```bash
-reposcry validate main
+reposcry-update --file crates/reposcry-cli/src/main.rs --refresh-search
 ```
+
+Useful incremental flags:
+
+| Flag | Effect |
+| --- | --- |
+| `--changed` | Include files from `git status --porcelain` and `git diff --name-only <base>`. |
+| `--file <path>` | Update an explicit file. Can be repeated. |
+| `--base <ref>` | Diff base for `--changed`. Defaults to `HEAD`. Use `main` for branch work. |
+| `--skip-warm-calls` | Skip call-edge warmup for the fastest possible update. |
+| `--refresh-search` | Rebuild lexical search documents after the file update. Semantic vectors are not rebuilt. |
 
 ## Full index workflow
 
-Use the full-index command when you want one command for an install-time index pass:
+Use a full index when setting up a repository or after large structural changes.
 
 ```bash
-reposcry --repo . index-full
-```
-
-Choose a semantic backend explicitly or force a full vector rebuild:
-
-```bash
-reposcry refresh-search --semantic-backend fastembed
-reposcry refresh-search --semantic-backend candle --reembed-all
-```
-
-If you already indexed files and only want to rebuild persisted call edges:
-
-```bash
+reposcry --repo . index --no-semantic
 reposcry --repo . warm-calls
+reposcry --repo . stats
 ```
 
-If you only want to rebuild search documents and vectors from the cached graph:
+`index-full` emits a JSON summary for automation:
 
 ```bash
-reposcry --repo . refresh-search --semantic-backend local-hash-v1
+reposcry --repo . index-full --no-semantic
+```
+
+## Semantic refresh is separate
+
+Semantic search is intentionally outside the normal edit loop.
+
+```bash
+reposcry refresh-search --semantic-backend local-hash-v1
+reposcry semantic_search_nodes "cache database calls" --semantic --semantic-backend local-hash-v1
+```
+
+Heavier backends are opt-in:
+
+```bash
+REPOSCRY_SEMANTIC_BACKEND=fastembed reposcry refresh-search --semantic-backend fastembed
+REPOSCRY_SEMANTIC_BACKEND=candle REPOSCRY_CANDLE_MODEL=qwen3 reposcry refresh-search --semantic-backend candle
+```
+
+Use `--reembed-all` when you want to discard cached vectors for the selected backend:
+
+```bash
+reposcry refresh-search --semantic-backend fastembed --reembed-all
 ```
 
 ## CRG-compatible commands
 
-RepoScry ships a CRG-compatible command surface directly from `reposcry`:
+RepoScry exposes a code-review-graph-compatible command surface:
 
 ```bash
 reposcry --repo . get_architecture_overview --format json
@@ -132,12 +137,36 @@ reposcry --repo . semantic_search_nodes "cache database calls" --limit 20
 reposcry --repo . refactor_tool rename parse_rust parse_rust_v2
 ```
 
+## Agent setup: Codex, Claude, Cursor, Copilot, and more
+
+Install project instructions and helper scripts for one platform:
+
+```bash
+reposcry install --platform codex
+reposcry install --platform claude
+reposcry install --platform cursor
+```
+
+Install all supported instruction templates:
+
+```bash
+reposcry install --platform all
+```
+
+Generated integrations instruct agents to:
+
+1. run `reposcry index --no-semantic` before broad exploration;
+2. create `.reposcry/AI_CONTEXT.md` for the current task;
+3. inspect dependencies and reverse dependencies before edits;
+4. run `reposcry-update --changed --base main` after edit batches;
+5. validate with `reposcry validate main HEAD`.
+
 ## MCP setup
 
 Run the MCP-compatible stdio server:
 
 ```bash
-reposcry mcp --repo /path/to/repo
+reposcry --repo /path/to/repo mcp
 ```
 
 Example client configuration:
@@ -147,7 +176,7 @@ Example client configuration:
   "mcpServers": {
     "reposcry": {
       "command": "reposcry",
-      "args": ["mcp", "--repo", "/path/to/repo"]
+      "args": ["--repo", "/path/to/repo", "mcp"]
     }
   }
 }
@@ -168,6 +197,7 @@ Supported MCP methods:
 - call sites
 - symbol-level call edges
 - local full-text search documents
+- optional semantic vectors
 
 The SQLite cache lives in:
 
@@ -177,7 +207,9 @@ The SQLite cache lives in:
 
 ## Semantic backends
 
-Semantic search works without external services by default with `local-hash-v1`.
+Default backend:
+
+- `local-hash-v1`
 
 Additional configured backends:
 
@@ -185,71 +217,63 @@ Additional configured backends:
 - `fastembed`
 - `candle`
 
-Index-time vector refresh now reuses cached vectors for unchanged node ids on a per-backend basis. Use `--reembed-all` when you want to discard and rebuild vectors for the selected backend, or `--no-semantic` to rebuild only lexical search documents.
-Use `reposcry refresh-search` when you want to rebuild search documents and vectors from the cached graph without rescanning the repository.
+Environment variables:
 
-`fastembed` now defaults its writable cache under `.reposcry/hf-home` when `HF_HOME` is not set. You can override that location with `REPOSCRY_FASTEMBED_CACHE_DIR`.
-`candle` uses the same writable Hugging Face cache root and supports:
-- `REPOSCRY_CANDLE_MODEL=qwen3` with default repo `Qwen/Qwen3-Embedding-0.6B`
-- `REPOSCRY_CANDLE_MODEL=nomic-v2-moe` with repo `nomic-ai/nomic-embed-text-v2-moe`
+| Backend | Variables |
+| --- | --- |
+| `ollama` | `REPOSCRY_OLLAMA_URL`, `REPOSCRY_OLLAMA_MODEL` |
+| `fastembed` | `REPOSCRY_FASTEMBED_MODEL`, `REPOSCRY_FASTEMBED_CACHE_DIR` |
+| `candle` | `REPOSCRY_CANDLE_MODEL`, `REPOSCRY_CANDLE_REPO`, `REPOSCRY_CANDLE_CACHE_DIR`, `REPOSCRY_CANDLE_MAX_LENGTH` |
 
-You can override the repo with `REPOSCRY_CANDLE_REPO` and the cache location with `REPOSCRY_CANDLE_CACHE_DIR`.
-
-Examples:
-
-```bash
-set REPOSCRY_SEMANTIC_BACKEND=fastembed
-set REPOSCRY_FASTEMBED_MODEL=AllMiniLML6V2
-reposcry index
-reposcry semantic_search_nodes "cache database calls" --semantic
-```
-
-```bash
-set REPOSCRY_SEMANTIC_BACKEND=ollama
-set REPOSCRY_OLLAMA_MODEL=nomic-embed-text
-reposcry semantic_search_nodes "cache database calls" --semantic
-```
-
-```bash
-set REPOSCRY_SEMANTIC_BACKEND=candle
-set REPOSCRY_CANDLE_MODEL=qwen3
-reposcry semantic_search_nodes "cache database calls" --semantic
-```
+`fastembed` and `candle` use `.reposcry/hf-home` as a writable Hugging Face cache root when `HF_HOME` is not set.
 
 ## Benchmarks
 
-Run local benchmarks with:
+Run RepoScry local benchmarks:
 
 ```bash
 bash scripts/bench.sh
 ```
 
-or on Windows:
+On Windows:
 
 ```powershell
 ./scripts/bench.ps1
 ```
 
-Run the full local fixture sweep with:
+Compare against `code-review-graph` on the same repository:
 
-```powershell
-./scripts/bench-all-fixtures.ps1
+```bash
+python scripts/bench-code-review-graph.py --repo .
 ```
 
-Published benchmark notes live in [BENCHMARKS.md](BENCHMARKS.md).
+To require a real `code-review-graph build` run:
+
+```bash
+pipx install code-review-graph
+python scripts/bench-code-review-graph.py --repo . --require-crg
+```
+
+The comparison runner writes JSON to:
+
+```text
+benchmarks/out/latest-code-review-graph-compare.json
+```
+
+Published notes live in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Release smoke
 
 Run the local release/install smoke path with:
 
-```powershell
-./scripts/smoke-release.ps1
-```
-
-or on Unix-like systems:
-
 ```bash
 bash scripts/smoke-release.sh
+```
+
+On Windows:
+
+```powershell
+./scripts/smoke-release.ps1
 ```
 
 ## Documentation
@@ -264,4 +288,5 @@ bash scripts/smoke-release.sh
 - Dynamic imports, reflection, and framework runtime behavior are under-approximated.
 - Call resolution still uses heuristics when multiple symbol matches are plausible.
 - Diff-based commands such as `detect_changes main HEAD` inspect git refs, not unstaged working tree edits.
-- Release-install verification currently covers checksum validation and local packaging logic; end-to-end GitHub release publication still requires exercising the workflow on GitHub.
+- Heavy semantic backends such as Candle/Qwen3 can be slow on first run because model download and vector generation are outside the fast edit loop.
+- End-to-end release publication requires a tagged GitHub release workflow run.
