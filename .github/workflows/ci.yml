@@ -16,11 +16,15 @@ jobs:
         run: cargo check --workspace --all-targets
       - name: Test
         run: cargo test --workspace --all-targets
+      - name: Build CLI binaries
+        run: cargo build -p reposcry-cli --bins
       - name: Fast index
-        run: cargo run -p reposcry-cli --bin reposcry -- index --no-semantic
+        run: ./target/debug/reposcry index --no-semantic
       - name: Incremental update
-        run: cargo run -p reposcry-cli --bin reposcry-update -- --file README.md --refresh-search --skip-warm-calls
+        run: ./target/debug/reposcry-update --file README.md --skip-warm-calls
+      - name: Refresh search
+        run: ./target/debug/reposcry refresh-search --no-semantic
       - name: Validate
-        run: cargo run -p reposcry-cli --bin reposcry -- validate main
+        run: ./target/debug/reposcry validate main
       - name: README smoke
         run: bash scripts/smoke-readme.sh
