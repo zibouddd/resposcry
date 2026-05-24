@@ -12,6 +12,18 @@ path = "src/main.rs"
 name = "reposcry-update"
 path = "src/bin/reposcry-update.rs"
 
+[[bin]]
+name = "reposcry-watch"
+path = "src/bin/reposcry-watch.rs"
+
+[[bin]]
+name = "reposcry-export"
+path = "src/bin/reposcry-export.rs"
+
+[[bin]]
+name = "reposcry-mcp-plus"
+path = "src/bin/reposcry-mcp-plus.rs"
+
 [dependencies]
 reposcry-graph = { path = "../reposcry-graph" }
 reposcry-indexer = { path = "../reposcry-indexer" }

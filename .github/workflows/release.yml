@@ -38,9 +38,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/reposcry dist/reposcry
-          cp target/${{ matrix.target }}/release/reposcry-update dist/reposcry-update
-          tar -czf reposcry-${{ matrix.target }}.tar.gz -C dist reposcry reposcry-update
+          for bin in reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus; do
+            cp target/${{ matrix.target }}/release/$bin dist/$bin
+          done
+          tar -czf reposcry-${{ matrix.target }}.tar.gz -C dist reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus
       - name: Verify packaged binaries (unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -48,8 +49,9 @@ jobs:
           rm -rf verify-dist
           mkdir -p verify-dist
           tar -xzf reposcry-${{ matrix.target }}.tar.gz -C verify-dist
-          ./verify-dist/reposcry --version
-          ./verify-dist/reposcry-update --version
+          for bin in reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus; do
+            ./verify-dist/$bin --version
+          done
       - name: Generate checksums (unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -64,24 +66,27 @@ jobs:
           export REPOSCRY_OS="$(uname -s)"
           export REPOSCRY_ARCH="$(uname -m)"
           bash ./install.sh
-          "$PWD/install-check/reposcry" --version
-          "$PWD/install-check/reposcry-update" --version
+          for bin in reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus; do
+            "$PWD/install-check/$bin" --version
+          done
       - name: Package release (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/${{ matrix.target }}/release/reposcry.exe dist/reposcry.exe
-          Copy-Item target/${{ matrix.target }}/release/reposcry-update.exe dist/reposcry-update.exe
-          Compress-Archive -Path dist/reposcry.exe, dist/reposcry-update.exe -DestinationPath reposcry-${{ matrix.target }}.zip
+          foreach ($bin in @("reposcry", "reposcry-update", "reposcry-watch", "reposcry-export", "reposcry-mcp-plus")) {
+            Copy-Item "target/${{ matrix.target }}/release/$bin.exe" "dist/$bin.exe"
+          }
+          Compress-Archive -Path dist/reposcry.exe, dist/reposcry-update.exe, dist/reposcry-watch.exe, dist/reposcry-export.exe, dist/reposcry-mcp-plus.exe -DestinationPath reposcry-${{ matrix.target }}.zip
       - name: Verify packaged binaries (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Remove-Item -Recurse -Force verify-dist -ErrorAction SilentlyContinue
           Expand-Archive -Path reposcry-${{ matrix.target }}.zip -DestinationPath verify-dist
-          .\verify-dist\reposcry.exe --version
-          .\verify-dist\reposcry-update.exe --version
+          foreach ($bin in @("reposcry", "reposcry-update", "reposcry-watch", "reposcry-export", "reposcry-mcp-plus")) {
+            & ".\verify-dist\$bin.exe" --version
+          }
       - name: Generate checksums (windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -100,8 +105,9 @@ jobs:
           $env:REPOSCRY_INSTALL_DIR = $installDir
           $env:REPOSCRY_ARCH = $env:PROCESSOR_ARCHITECTURE
           .\install.ps1
-          & (Join-Path $installDir 'reposcry.exe') --version
-          & (Join-Path $installDir 'reposcry-update.exe') --version
+          foreach ($bin in @("reposcry", "reposcry-update", "reposcry-watch", "reposcry-export", "reposcry-mcp-plus")) {
+            & (Join-Path $installDir "$bin.exe") --version
+          }
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

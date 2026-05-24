@@ -65,11 +65,18 @@ curl -fsSL "$checksum_url" -o "$TMP_DIR/$checksum_asset"
 verify_checksum "$TMP_DIR/$checksum_asset" "$TMP_DIR/$asset"
 tar -xzf "$TMP_DIR/$asset" -C "$TMP_DIR"
 
-for bin in reposcry reposcry-update; do
+install_one() {
+  local bin="$1"
   if [[ ! -f "$TMP_DIR/$bin" ]]; then
     echo "Archive did not contain $bin" >&2
     exit 1
   fi
   install -m 0755 "$TMP_DIR/$bin" "$INSTALL_DIR/$bin"
   echo "Installed $bin to $INSTALL_DIR/$bin"
-done
+}
+
+install_one reposcry
+install_one reposcry-update
+install_one reposcry-watch
+install_one reposcry-export
+install_one reposcry-mcp-plus
