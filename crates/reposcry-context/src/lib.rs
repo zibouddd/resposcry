@@ -8,7 +8,7 @@ use reposcry_cache::db::CacheDb;
 use reposcry_git::GitIntegration;
 use reposcry_graph::edge::EdgeKind;
 use reposcry_graph::graph::CodeGraph;
-use reposcry_graph::node::NodeKind;
+use reposcry_graph::node::{GraphNode, NodeKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextPack {
@@ -20,6 +20,7 @@ pub struct ContextPack {
     pub suggested_read_order: Vec<String>,
     pub suggested_tests: Vec<String>,
     pub architecture_rules: Vec<String>,
+    pub implementation_plan: Vec<String>,
     pub confidence: Confidence,
     pub strict_warnings: Vec<String>,
     pub omitted_symbols: Vec<OmittedSymbols>,
@@ -121,8 +122,15 @@ impl ContextBuilder {
     pub fn build(&self, task: &str) -> Result<ContextPack> {
         debug!("Building context pack for task: {}", task);
         let keywords = extract_keywords(task);
+        let backend_keywords = [
+            "backend", "storage", "database", "cache", "provider", "driver", "adapter",
+            "plugin", "feature",
+        ];
+        let task_lower = task.to_lowercase();
+        let is_backend_task = backend_keywords.iter().any(|kw| task_lower.contains(kw));
 
-        // Step 1: Search files/symbols by keywords
+        // Step 1: Search files/symbols by keywords. This intentionally allows multiple hits
+        // per file; we dedupe by path after ranking so the strongest duplicate survives.
         let mut matched_files: Vec<ContextFile> = Vec::new();
         for node in self.graph.nodes.values() {
             let path = match &node.file_path {
@@ -134,45 +142,45 @@ impl ContextBuilder {
                 matched_files.push(ContextFile {
                     path: path.to_string(),
                     reason: format!("Keyword match (score: {:.2})", relevance),
-                    important_symbols: self.symbols_in_file(path),
+                    important_symbols: self.symbols_in_file(path, &keywords),
                 });
             }
         }
-        // Also search by keyword in file content via cache
+
+        // Also search by filename via cache. Cache entries are file-level, so this catches
+        // manifests and public crate roots that may not have relevant symbols.
         if let Some(ref cache) = self.cache {
             for entry in cache.get_all_files()? {
                 if matched_files.iter().any(|f| f.path == entry.path) {
                     continue;
                 }
-                let relevance = score_relevance(&entry.path, &entry.path, &keywords);
+                let relevance = score_file_relevance(&entry.path, &keywords, is_backend_task);
                 if relevance > 0.0 {
                     matched_files.push(ContextFile {
                         path: entry.path.clone(),
                         reason: format!("File name match (score: {:.2})", relevance),
-                        important_symbols: self.symbols_in_file(&entry.path),
+                        important_symbols: self.symbols_in_file(&entry.path, &keywords),
                     });
                 }
             }
         }
 
-        // Step 1b: Force-include manifests for backend/storage tasks
-        let backend_keywords = ["backend", "storage", "database", "cache", "provider",
-                                "driver", "adapter", "plugin", "feature"];
-        let is_backend_task = backend_keywords.iter().any(|kw| task.to_lowercase().contains(kw));
+        // Step 1b: Force-include manifests and public module roots for backend/storage tasks.
         if is_backend_task {
             if let Some(ref cache) = self.cache {
                 for entry in cache.get_all_files()? {
-                    let is_manifest = entry.path.ends_with("Cargo.toml")
-                        || entry.path.ends_with("package.json")
-                        || entry.path.contains("lib.rs")
-                        || entry.path.contains("mod.rs");
+                    let path = normalize_path(&entry.path);
+                    let is_manifest = path.ends_with("cargo.toml")
+                        || path.ends_with("package.json")
+                        || path.ends_with("/lib.rs")
+                        || path.ends_with("/mod.rs");
                     if is_manifest && !matched_files.iter().any(|f| f.path == entry.path) {
-                        let manifest_relevance = score_relevance(&entry.path, &entry.path, &keywords);
-                        if manifest_relevance > 0.0 || entry.path.contains("reposcry-cache") {
+                        let relevance = score_file_relevance(&entry.path, &keywords, true);
+                        if relevance > 0.0 {
                             matched_files.push(ContextFile {
                                 path: entry.path.clone(),
-                                reason: "Manifest for backend/storage task".into(),
-                                important_symbols: self.symbols_in_file(&entry.path),
+                                reason: "Manifest/public API for backend/storage task".into(),
+                                important_symbols: self.symbols_in_file(&entry.path, &keywords),
                             });
                         }
                     }
@@ -180,16 +188,22 @@ impl ContextBuilder {
             }
         }
 
-        // Sort by relevance
+        // Sort by task relevance, downranking fixtures and generated/benchmark context.
         matched_files.sort_by(|a, b| {
-            let a_score = score_relevance(&a.path, &a.path, &keywords);
-            let b_score = score_relevance(&b.path, &b.path, &keywords);
+            let a_score = score_file_relevance(&a.path, &keywords, is_backend_task);
+            let b_score = score_file_relevance(&b.path, &keywords, is_backend_task);
             b_score
                 .partial_cmp(&a_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.path.cmp(&b.path))
         });
 
-        // Track omitted symbols per file
+        // Dedupe before budget truncation. This avoids spending file slots on repeated db.rs
+        // hits and lets compact budgets keep Cargo.toml/lib.rs/test-adjacent context.
+        let mut seen_file_paths = HashSet::new();
+        matched_files.retain(|f| seen_file_paths.insert(f.path.clone()));
+
+        // Track omitted symbols per file after edit-relevance ranking.
         let max_syms = self.config.max_symbols_per_file as usize;
         let mut omitted_list = Vec::new();
         for file in &mut matched_files {
@@ -216,9 +230,10 @@ impl ContextBuilder {
         // Step 5: Risk warnings
         let risk_warnings = self.compute_risk_warnings(&matched_files);
 
-        // Step 6: Architecture rules — filter by matched file paths
+        // Step 6: Architecture rules and implementation plan — filter by matched file paths
         let matched_paths: HashSet<&str> = matched_files.iter().map(|f| f.path.as_str()).collect();
         let architecture_rules = self.compute_architecture_rules(&matched_paths);
+        let implementation_plan = self.compute_implementation_plan(task, &matched_files);
 
         // Step 7: Determine confidence
         let confidence = if matched_files.is_empty() {
@@ -252,14 +267,10 @@ impl ContextBuilder {
             }
         }
 
-        // Build read order (deduped)
+        // Build read order (already deduped relevant files, keep ranking order)
         let mut suggested_read_order: Vec<String> =
             matched_files.iter().map(|f| f.path.clone()).collect();
-        suggested_read_order.sort();
-        suggested_read_order.dedup();
-        if suggested_read_order.len() > 10 {
-            suggested_read_order.truncate(10);
-        }
+        suggested_read_order.truncate(10);
 
         let mut pack = ContextPack {
             user_task: task.to_string(),
@@ -270,6 +281,7 @@ impl ContextBuilder {
             suggested_read_order,
             suggested_tests,
             architecture_rules,
+            implementation_plan,
             confidence,
             strict_warnings,
             omitted_symbols: if self.config.show_omitted { omitted_list } else { vec![] },
@@ -278,19 +290,43 @@ impl ContextBuilder {
         Ok(pack)
     }
 
-    fn symbols_in_file(&self, path: &str) -> Vec<String> {
-        self.graph
+    fn symbols_in_file(&self, path: &str, keywords: &[String]) -> Vec<String> {
+        let mut nodes: Vec<&GraphNode> = self
+            .graph
             .nodes
             .values()
             .filter(|n| n.file_path.as_deref() == Some(path) && n.kind != NodeKind::File)
-            .map(|n| {
-                if let Some(signature) = &n.signature {
-                    format!("{} - {}", n.name, Self::ascii_arrow(signature))
-                } else {
-                    n.name.clone()
-                }
-            })
-            .collect()
+            .collect();
+
+        nodes.sort_by(|a, b| {
+            let a_score = symbol_relevance_score(a, keywords);
+            let b_score = symbol_relevance_score(b, keywords);
+            b_score
+                .partial_cmp(&a_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+
+        nodes.iter().map(|n| Self::format_symbol(n)).collect()
+    }
+
+    fn format_symbol(node: &GraphNode) -> String {
+        let line_range = match (node.start_line, node.end_line) {
+            (Some(start), Some(end)) if end > start => format!(" L{}-{}", start, end),
+            (Some(start), _) => format!(" L{}", start),
+            _ => String::new(),
+        };
+
+        if let Some(signature) = &node.signature {
+            format!(
+                "{}{} - {}",
+                node.name,
+                line_range,
+                Self::ascii_arrow(signature)
+            )
+        } else {
+            format!("{}{} ({})", node.name, line_range, node.kind.as_str())
+        }
     }
 
     fn find_dependency_paths(&self, files: &[ContextFile]) -> Vec<String> {
@@ -318,7 +354,7 @@ impl ContextBuilder {
             deps.sort();
             deps.dedup();
             if !deps.is_empty() {
-                let chain = format!("{} → {}", file.path, deps.join(" → "));
+                let chain = format!("{} -> {}", file.path, deps.join(" -> "));
                 paths.push(chain);
             }
         }
@@ -360,18 +396,24 @@ impl ContextBuilder {
     }
 
     fn find_tests(&self, ctx_files: &[ContextFile]) -> Vec<String> {
-        // Collect relevant crate names from matched files
         let matched_crates: HashSet<String> = ctx_files
             .iter()
             .filter_map(|f| {
-                f.path
+                normalize_path(&f.path)
                     .split('/')
                     .find(|segment| segment.starts_with("reposcry-"))
                     .map(|c| c.to_string())
             })
             .collect();
 
-        let all_tests: Vec<(String, u32)> = self
+        let mut tests = Vec::new();
+        let mut crate_names: Vec<String> = matched_crates.iter().cloned().collect();
+        crate_names.sort();
+        for crate_name in &crate_names {
+            tests.push(format!("cargo test -p {}", crate_name));
+        }
+
+        let mut graph_tests: Vec<(String, u32)> = self
             .graph
             .nodes
             .values()
@@ -381,10 +423,11 @@ impl ContextBuilder {
             })
             .filter_map(|n| {
                 let path = n.file_path.clone()?;
-                let crate_match = matched_crates.iter().find(|c| path.contains(c.as_str()));
+                let normalized = normalize_path(&path);
+                let crate_match = matched_crates.iter().find(|c| normalized.contains(c.as_str()));
                 let priority: u32 = if crate_match.is_some() {
                     0 // same crate = highest priority
-                } else if path.contains("fixtures") || path.contains("benchmarks") {
+                } else if normalized.contains("fixtures") || normalized.contains("benchmarks") {
                     2 // fixture tests = lowest priority
                 } else {
                     1 // other crate tests
@@ -392,14 +435,20 @@ impl ContextBuilder {
                 Some((path, priority))
             })
             .collect();
+        graph_tests.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
-        let mut tests: Vec<String> = all_tests
-            .into_iter()
-            .filter(|(_, p)| *p == 0) // same-crate tests first
-            .map(|(p, _)| p)
-            .collect();
-        tests.sort();
-        tests.dedup();
+        for (path, priority) in graph_tests {
+            if priority > 0 && !tests.is_empty() {
+                continue;
+            }
+            tests.push(path);
+            if tests.len() >= 8 {
+                break;
+            }
+        }
+
+        let mut seen_tests = HashSet::new();
+        tests.retain(|t| seen_tests.insert(t.clone()));
         tests
     }
 
@@ -466,7 +515,9 @@ impl ContextBuilder {
             rules.push("CLI commands should prefer the crg_cli module for complex output formatting.".into());
         }
 
-        let has_context_files = matched_paths.iter().any(|p| p.contains("reposcry-context") || p.contains("reposcry-graph"));
+        let has_context_files = matched_paths
+            .iter()
+            .any(|p| p.contains("reposcry-context") || p.contains("reposcry-graph"));
         if has_context_files {
             rules.push("Context pack changes must preserve backward compatibility of the ContextPack JSON schema.".into());
         }
@@ -474,18 +525,40 @@ impl ContextBuilder {
         rules
     }
 
+    fn compute_implementation_plan(&self, task: &str, files: &[ContextFile]) -> Vec<String> {
+        let task_lower = task.to_lowercase();
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        let cache_backend_task = task_lower.contains("cache")
+            && (task_lower.contains("backend")
+                || task_lower.contains("storage")
+                || task_lower.contains("database")
+                || task_lower.contains("adapter"));
+
+        if cache_backend_task && paths.iter().any(|p| p.contains("reposcry-cache")) {
+            return vec![
+                "Inspect crates/reposcry-cache/src/lib.rs and crates/reposcry-cache/Cargo.toml before changing the storage API.".into(),
+                "Keep CacheDb as the current SQLite-backed implementation unless introducing a trait preserves all existing public methods.".into(),
+                "Touch constructor/config paths first: CacheDb::open, CacheDb::open_in_memory, CacheDb::initialize, set_config, and get_config.".into(),
+                "Preserve search document/vector, import, symbol, call-site, and edge persistence semantics for the new backend.".into(),
+                "Run cargo test -p reposcry-cache before dependent CLI/context tests.".into(),
+            ];
+        }
+
+        Vec::new()
+    }
+
     fn ascii_arrow(s: &str) -> String {
         s.replace('\u{2014}', "-")
-         .replace('\u{2013}', "-")
-         .replace('\u{2192}', "->")
-         .replace('\u{2190}', "<-")
-         .replace('\u{2713}', "[ok]")
-         .replace('\u{2717}', "[no]")
-         .replace('\u{26a0}', "[!]")
-         .replace('\u{2018}', "'")
-         .replace('\u{2019}', "'")
-         .replace('\u{201c}', "\"")
-         .replace('\u{201d}', "\"")
+            .replace('\u{2013}', "-")
+            .replace('\u{2192}', "->")
+            .replace('\u{2190}', "<-")
+            .replace('\u{2713}', "[ok]")
+            .replace('\u{2717}', "[no]")
+            .replace('\u{26a0}', "[!]")
+            .replace('\u{2018}', "'")
+            .replace('\u{2019}', "'")
+            .replace('\u{201c}', "\"")
+            .replace('\u{201d}', "\"")
     }
 
     pub fn render_markdown(&self, pack: &ContextPack) -> String {
@@ -503,6 +576,23 @@ impl ContextBuilder {
                 for sym in &file.important_symbols {
                     md.push_str(&format!("- {}\n", Self::ascii_arrow(sym)));
                 }
+            }
+            md.push('\n');
+        }
+        if !pack.omitted_symbols.is_empty() {
+            md.push_str("## Omitted lower-priority symbols\n\n");
+            for omitted in &pack.omitted_symbols {
+                md.push_str(&format!(
+                    "- {}: {} omitted\n",
+                    omitted.path, omitted.omitted_count
+                ));
+            }
+            md.push('\n');
+        }
+        if !pack.implementation_plan.is_empty() {
+            md.push_str("## Likely implementation plan\n\n");
+            for (i, step) in pack.implementation_plan.iter().enumerate() {
+                md.push_str(&format!("{}. {}\n", i + 1, Self::ascii_arrow(step)));
             }
             md.push('\n');
         }
@@ -572,21 +662,17 @@ impl ContextBuilder {
 impl ContextPack {
     /// Deduplicate all fields by path, symbol text, warning text, etc.
     pub fn dedupe(&mut self) {
-        // Deduplicate relevant files by path (already mostly done, but be safe)
         let mut seen_paths = HashSet::new();
         self.relevant_files.retain(|f| seen_paths.insert(f.path.clone()));
 
-        // Deduplicate symbols within each file
         for file in &mut self.relevant_files {
             let mut seen_syms = HashSet::new();
             file.important_symbols.retain(|s| seen_syms.insert(s.clone()));
         }
 
-        // Deduplicate dependency paths
         let mut seen_deps = HashSet::new();
         self.dependency_paths.retain(|p| seen_deps.insert(p.clone()));
 
-        // Deduplicate reverse dependency entries
         let mut seen_rd = HashSet::new();
         self.reverse_dependencies.retain(|rd| seen_rd.insert(rd.path.clone()));
         for rd in &mut self.reverse_dependencies {
@@ -594,100 +680,79 @@ impl ContextPack {
             rd.used_by.retain(|u| seen_users.insert(u.clone()));
         }
 
-        // Deduplicate risk warnings
         let mut seen_warnings = HashSet::new();
         self.risk_warnings.retain(|w| seen_warnings.insert(w.clone()));
 
-        // Deduplicate suggested read order
         let mut seen_read = HashSet::new();
         self.suggested_read_order.retain(|r| seen_read.insert(r.clone()));
 
-        // Deduplicate suggested tests
         let mut seen_tests = HashSet::new();
         self.suggested_tests.retain(|t| seen_tests.insert(t.clone()));
 
-        // Deduplicate architecture rules
         let mut seen_rules = HashSet::new();
         self.architecture_rules.retain(|r| seen_rules.insert(r.clone()));
+
+        let mut seen_steps = HashSet::new();
+        self.implementation_plan.retain(|s| seen_steps.insert(s.clone()));
     }
 }
 
 fn extract_keywords(task: &str) -> Vec<String> {
     let stop_words = [
-        "the",
-        "a",
-        "an",
-        "is",
-        "are",
-        "was",
-        "were",
-        "be",
-        "been",
-        "being",
-        "have",
-        "has",
-        "had",
-        "do",
-        "does",
-        "did",
-        "will",
-        "would",
-        "could",
-        "should",
-        "may",
-        "might",
-        "shall",
-        "can",
-        "fix",
-        "add",
-        "change",
-        "update",
-        "remove",
-        "implement",
-        "make",
-        "get",
-        "set",
-        "this",
-        "that",
-        "these",
-        "those",
-        "to",
-        "of",
-        "in",
-        "for",
-        "on",
-        "with",
-        "at",
-        "by",
-        "from",
-        "as",
-        "into",
-        "about",
-        "after",
-        "before",
-        "between",
-        "under",
-        "and",
-        "but",
-        "or",
-        "nor",
-        "not",
-        "so",
-        "yet",
-        "no",
-        "bug",
-        "feature",
-        "issue",
-        "task",
-        "when",
-        "no",
-        "not",
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have",
+        "has", "had", "do", "does", "did", "will", "would", "could", "should", "may",
+        "might", "shall", "can", "fix", "add", "change", "update", "remove", "implement",
+        "make", "get", "set", "new", "this", "that", "these", "those", "to", "of", "in",
+        "for", "on", "with", "at", "by", "from", "as", "into", "about", "after", "before",
+        "between", "under", "and", "but", "or", "nor", "not", "so", "yet", "no", "bug",
+        "feature", "issue", "task", "when",
     ];
-    task.split(|c: char| !c.is_alphanumeric())
+    let mut words: Vec<String> = task
+        .split(|c: char| !c.is_alphanumeric())
         .filter(|w| w.len() > 2)
         .filter(|w| !stop_words.contains(w))
         .map(|w| w.to_lowercase())
-        .collect()
+        .collect();
+    words.sort();
+    words.dedup();
+    words
+}
+
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/").to_lowercase()
+}
+
+fn score_file_relevance(path: &str, keywords: &[String], is_backend_task: bool) -> f64 {
+    let lower_path = normalize_path(path);
+    let mut score = score_relevance(path, path, keywords);
+
+    if lower_path.contains("/src/") {
+        score += 1.0;
+    }
+    if lower_path.contains("benchmarks/fixtures") || lower_path.contains("/fixtures/") {
+        score -= 5.0;
+    }
+    if lower_path.contains("target/") || lower_path.contains("node_modules/") {
+        score -= 10.0;
+    }
+
+    if is_backend_task {
+        if lower_path.ends_with("cargo.toml") || lower_path.ends_with("package.json") {
+            score += 3.0;
+        }
+        if lower_path.ends_with("/lib.rs") || lower_path.ends_with("/mod.rs") {
+            score += 2.5;
+        }
+        if lower_path.contains("/db.rs")
+            || lower_path.contains("database")
+            || lower_path.contains("storage")
+            || lower_path.contains("cache")
+        {
+            score += 2.0;
+        }
+    }
+
+    score
 }
 
 fn score_relevance(name: &str, path: &str, keywords: &[String]) -> f64 {
@@ -703,5 +768,52 @@ fn score_relevance(name: &str, path: &str, keywords: &[String]) -> f64 {
             score += 0.5;
         }
     }
+    score
+}
+
+fn symbol_relevance_score(node: &GraphNode, keywords: &[String]) -> f64 {
+    let lower_name = node.name.to_lowercase();
+    let lower_sig = node.signature.as_deref().unwrap_or_default().to_lowercase();
+    let mut score = 0.0;
+
+    for kw in keywords {
+        if lower_name.contains(kw) {
+            score += 2.0;
+        }
+        if lower_sig.contains(kw) {
+            score += 1.0;
+        }
+    }
+
+    if matches!(
+        node.kind,
+        NodeKind::Struct | NodeKind::Class | NodeKind::Enum | NodeKind::Trait | NodeKind::Interface
+    ) {
+        score += 2.5;
+    }
+
+    if lower_name == "cachedb" {
+        score += 10.0;
+    }
+    if lower_name.contains("open") || lower_name.contains("initialize") {
+        score += 6.0;
+    }
+    if lower_name.contains("config") {
+        score += 5.0;
+    }
+    if lower_name.contains("search_vector") || lower_name.contains("search_document") {
+        score += 4.5;
+    }
+    if lower_name.contains("insert")
+        || lower_name.contains("upsert")
+        || lower_name.contains("delete")
+        || lower_name.contains("clear")
+    {
+        score += 3.0;
+    }
+    if lower_name.contains("count") || lower_name.contains("stats") || lower_name.contains("language_stats") {
+        score -= 2.0;
+    }
+
     score
 }
