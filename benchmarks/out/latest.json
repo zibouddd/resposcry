@@ -1,0 +1,43 @@
+{
+  "captured_at": "2026-05-26T09:33:39Z",
+  "machine": {
+    "os": "Microsoft Windows [version 10.0.26200.8457]",
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "memory_gb": "unknown",
+    "profile": "release"
+  },
+  "repo": {
+    "path": "F:\\CODING\\2-PROJETS-EN-COURS\\reposcry",
+    "fixture": "current_repo",
+    "size": "small_rust_workspace",
+    "notes": "Primary smoke and regression fixture committed with the repository.",
+    "fixture_manifest": "benchmarks/fixtures.json"
+  },
+  "queries": {
+    "callers_query": "callers_of rebuild_graph",
+    "semantic_query": "cache database calls",
+    "context_query": "where is request handling implemented"
+  },
+  "metrics": {
+    "cold_index_ms": 1916,
+    "warm_index_ms": 1086,
+    "warm_index_speedup": 1.76,
+    "semantic_index_reuse_ms": 377,
+    "semantic_index_reembed_ms": 414,
+    "call_warmup_ms": 181,
+    "architecture_overview_ms": 95,
+    "detect_changes_ms": 175,
+    "affected_flows_ms": 174,
+    "query_graph_callers_ms": 77,
+    "context_pack_ms": 75,
+    "semantic_search_ms": 102,
+    "db_size_bytes": 3162112,
+    "files_indexed": 118,
+    "symbols_indexed": 631,
+    "imports_indexed": 221,
+    "persisted_call_sites": 6301,
+    "persisted_symbol_call_edges": 1150,
+    "persisted_file_call_edges": 80,
+    "total_edges": 123
+  }
+}

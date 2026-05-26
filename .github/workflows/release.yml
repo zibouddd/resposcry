@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binaries
+        run: cargo build --release -p reposcry-cli --bins --target ${{ matrix.target }}
+      - name: Package release (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          for bin in reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus; do
+            cp target/${{ matrix.target }}/release/$bin dist/$bin
+          done
+          tar -czf reposcry-${{ matrix.target }}.tar.gz -C dist reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus
+      - name: Verify packaged binaries (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          rm -rf verify-dist
+          mkdir -p verify-dist
+          tar -xzf reposcry-${{ matrix.target }}.tar.gz -C verify-dist
+          for bin in reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus; do
+            ./verify-dist/$bin --version
+          done
+      - name: Generate checksums (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          shasum -a 256 reposcry-${{ matrix.target }}.tar.gz > reposcry-${{ matrix.target }}.tar.gz.sha256
+      - name: Verify install.sh contract (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export REPOSCRY_RELEASE_BASE_URL="file://$PWD"
+          export REPOSCRY_INSTALL_DIR="$PWD/install-check"
+          export REPOSCRY_OS="$(uname -s)"
+          export REPOSCRY_ARCH="$(uname -m)"
+          bash ./install.sh
+          for bin in reposcry reposcry-update reposcry-watch reposcry-export reposcry-mcp-plus; do
+            "$PWD/install-check/$bin" --version
+          done
+      - name: Package release (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          foreach ($bin in @("reposcry", "reposcry-update", "reposcry-watch", "reposcry-export", "reposcry-mcp-plus")) {
+            Copy-Item "target/${{ matrix.target }}/release/$bin.exe" "dist/$bin.exe"
+          }
+          Compress-Archive -Path dist/reposcry.exe, dist/reposcry-update.exe, dist/reposcry-watch.exe, dist/reposcry-export.exe, dist/reposcry-mcp-plus.exe -DestinationPath reposcry-${{ matrix.target }}.zip
+      - name: Verify packaged binaries (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force verify-dist -ErrorAction SilentlyContinue
+          Expand-Archive -Path reposcry-${{ matrix.target }}.zip -DestinationPath verify-dist
+          foreach ($bin in @("reposcry", "reposcry-update", "reposcry-watch", "reposcry-export", "reposcry-mcp-plus")) {
+            & ".\verify-dist\$bin.exe" --version
+          }
+      - name: Generate checksums (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $asset = "reposcry-${{ matrix.target }}.zip"
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
+          Set-Content -NoNewline -Path "$asset.sha256" -Value "$hash  $asset"
+      - name: Verify install.ps1 contract (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $releaseDir = (Get-Location).Path
+          $installDir = Join-Path $releaseDir "install-check"
+          Remove-Item -Recurse -Force $installDir -ErrorAction SilentlyContinue
+          $env:REPOSCRY_RELEASE_BASE_URL = "file:///$($releaseDir -replace '\\','/')"
+          $env:REPOSCRY_INSTALL_DIR = $installDir
+          $env:REPOSCRY_ARCH = $env:PROCESSOR_ARCHITECTURE
+          .\install.ps1
+          foreach ($bin in @("reposcry", "reposcry-update", "reposcry-watch", "reposcry-export", "reposcry-mcp-plus")) {
+            & (Join-Path $installDir "$bin.exe") --version
+          }
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reposcry-${{ matrix.target }}
+          path: |
+            reposcry-${{ matrix.target }}.*
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            reposcry-${{ matrix.target }}.*

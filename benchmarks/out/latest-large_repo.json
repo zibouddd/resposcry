@@ -1,0 +1,35 @@
+﻿{
+    "captured_at":  "2026-05-23T16:05:06.6939573Z",
+    "machine":  {
+                    "os":  "Microsoft Windows [version 10.0.26200.8457]",
+                    "cpu":  "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+                    "memory_gb":  "unknown"
+                },
+    "repo":  {
+                 "path":  "F:\\CODING\\2-PROJETS-EN-COURS\\CodeReviewGraphX\\benchmarks\\fixtures\\large_repo",
+                 "fixture":  "large_repo",
+                 "size":  "large",
+                 "notes":  "Synthetic larger mixed repository with several apps, packages, and Rust services to observe scaling and database growth.",
+                 "fixture_manifest":  "benchmarks/fixtures.json"
+             },
+    "metrics":  {
+                    "cold_index_ms":  458,
+                    "warm_index_ms":  322,
+                    "semantic_index_reuse_ms":  273,
+                    "semantic_index_reembed_ms":  396,
+                    "call_warmup_ms":  127,
+                    "architecture_overview_ms":  66,
+                    "detect_changes_ms":  156,
+                    "affected_flows_ms":  154,
+                    "query_graph_callers_ms":  66,
+                    "semantic_search_ms":  66,
+                    "db_size_bytes":  118784,
+                    "files_indexed":  21,
+                    "symbols_indexed":  14,
+                    "imports_indexed":  10,
+                    "persisted_call_sites":  29,
+                    "persisted_symbol_call_edges":  11,
+                    "persisted_file_call_edges":  11,
+                    "total_edges":  20
+                }
+}

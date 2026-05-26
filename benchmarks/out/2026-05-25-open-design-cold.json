@@ -1,0 +1,22 @@
+{
+  "repo": "/Users/rbdv/Desktop/open-design",
+  "commit": "a3a238247e8801fb757527cc0f047cbb923620ac",
+  "files_seen": 4069,
+  "files_indexed": 4069,
+  "unchanged_files": 0,
+  "changed_files": 0,
+  "parsed_count": 0,
+  "deleted_count": 0,
+  "scan_ms": 153,
+  "parse_ms": 7424,
+  "db_write_ms": 0,
+  "edge_rebuild_ms": 10800,
+  "search_rebuild_ms": 3895,
+  "total_ms": 22280,
+  "db_bytes": 78475264,
+  "symbols": 8059,
+  "imports": 5478,
+  "call_sites": 137257,
+  "symbol_call_edges": 16199,
+  "file_edges": 3692
+}

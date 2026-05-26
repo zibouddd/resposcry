@@ -1,0 +1,21 @@
+[package]
+name = "reposcry-rules"
+version = "0.1.0"
+edition = "2021"
+description = "Rule and policy helpers for RepoScry code graph analysis and AI-agent workflows."
+license = "MIT"
+repository = "https://github.com/zibouddd/reposcry"
+homepage = "https://github.com/zibouddd/reposcry"
+documentation = "https://docs.rs/reposcry-rules"
+keywords = ["rules", "repo", "graph", "ai", "analysis"]
+categories = ["development-tools"]
+
+[dependencies]
+reposcry-graph = { version = "0.1.0", path = "../reposcry-graph" }
+reposcry-indexer = { version = "0.1.0", path = "../reposcry-indexer" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+globset = "0.4"
+anyhow = "1"
+tracing = "0.1"

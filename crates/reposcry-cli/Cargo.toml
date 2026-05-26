@@ -1,0 +1,57 @@
+[package]
+name = "reposcry-cli"
+version = "0.1.0"
+edition = "2021"
+autobins = false
+description = "Rust-native repository graph CLI for AI coding agents."
+license = "MIT"
+repository = "https://github.com/zibouddd/reposcry"
+homepage = "https://github.com/zibouddd/reposcry"
+documentation = "https://docs.rs/reposcry-cli"
+keywords = ["repo", "graph", "mcp", "ai", "cli"]
+categories = ["development-tools"]
+
+[[bin]]
+name = "reposcry"
+path = "src/main.rs"
+
+[[bin]]
+name = "reposcry-update"
+path = "src/bin/reposcry-update.rs"
+
+[[bin]]
+name = "reposcry-watch"
+path = "src/bin/reposcry-watch.rs"
+
+[[bin]]
+name = "reposcry-export"
+path = "src/bin/reposcry-export.rs"
+
+[[bin]]
+name = "reposcry-mcp-plus"
+path = "src/bin/reposcry-mcp-plus.rs"
+
+[dependencies]
+reposcry-graph = { version = "0.1.0", path = "../reposcry-graph" }
+reposcry-indexer = { version = "0.1.0", path = "../reposcry-indexer" }
+reposcry-cache = { version = "0.1.0", path = "../reposcry-cache" }
+reposcry-git = { version = "0.1.0", path = "../reposcry-git" }
+reposcry-context = { version = "0.1.0", path = "../reposcry-context" }
+reposcry-rules = { version = "0.1.0", path = "../reposcry-rules" }
+reposcry-report = { version = "0.1.0", path = "../reposcry-report" }
+
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+chrono = { version = "0.4", features = ["serde"] }
+blake3 = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+fastembed = { version = "5.13.4", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls", "nomic-v2-moe", "qwen3"] }
+candle-core = "0.10.2"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.31"

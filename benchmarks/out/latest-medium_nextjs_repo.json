@@ -1,0 +1,35 @@
+﻿{
+    "captured_at":  "2026-05-23T16:05:01.1919917Z",
+    "machine":  {
+                    "os":  "Microsoft Windows [version 10.0.26200.8457]",
+                    "cpu":  "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+                    "memory_gb":  "unknown"
+                },
+    "repo":  {
+                 "path":  "F:\\CODING\\2-PROJETS-EN-COURS\\CodeReviewGraphX\\benchmarks\\fixtures\\medium_nextjs_repo",
+                 "fixture":  "medium_nextjs_repo",
+                 "size":  "medium",
+                 "notes":  "Next.js-style repository with API routes, middleware, and server actions to exercise flow detection.",
+                 "fixture_manifest":  "benchmarks/fixtures.json"
+             },
+    "metrics":  {
+                    "cold_index_ms":  235,
+                    "warm_index_ms":  226,
+                    "semantic_index_reuse_ms":  284,
+                    "semantic_index_reembed_ms":  191,
+                    "call_warmup_ms":  100,
+                    "architecture_overview_ms":  64,
+                    "detect_changes_ms":  160,
+                    "affected_flows_ms":  159,
+                    "query_graph_callers_ms":  71,
+                    "semantic_search_ms":  69,
+                    "db_size_bytes":  98304,
+                    "files_indexed":  11,
+                    "symbols_indexed":  9,
+                    "imports_indexed":  8,
+                    "persisted_call_sites":  10,
+                    "persisted_symbol_call_edges":  5,
+                    "persisted_file_call_edges":  5,
+                    "total_edges":  11
+                }
+}

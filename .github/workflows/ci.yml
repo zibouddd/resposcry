@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace --all-targets
+      - name: Build CLI binaries
+        run: cargo build -p reposcry-cli --bins
+      - name: Fast index
+        run: ./target/debug/reposcry index --no-semantic
+      - name: Incremental update
+        run: ./target/debug/reposcry-update --file README.md --skip-warm-calls
+      - name: Watch once
+        run: ./target/debug/reposcry-watch --once --json
+      - name: Refresh search
+        run: ./target/debug/reposcry refresh-search --no-semantic
+      - name: Export graph
+        run: |
+          ./target/debug/reposcry-export --format json --output .reposcry/graph.json
+          ./target/debug/reposcry-export --format graphml --output .reposcry/graph.graphml
+          ./target/debug/reposcry-export --format html --output .reposcry/graph.html
+      - name: MCP plus smoke
+        run: |
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_graph_summary","arguments":{}}}' | ./target/debug/reposcry-mcp-plus --repo . > .reposcry/mcp-plus-smoke.jsonl
+          grep 'reposcry-mcp-plus' .reposcry/mcp-plus-smoke.jsonl
+          grep 'get_graph_summary' .reposcry/mcp-plus-smoke.jsonl
+      - name: Validate
+        run: ./target/debug/reposcry validate main
+      - name: README smoke
+        run: bash scripts/smoke-readme.sh

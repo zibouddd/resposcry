@@ -1,0 +1,17 @@
+[package]
+name = "reposcry-graph"
+version = "0.1.0"
+edition = "2021"
+description = "Core graph model for RepoScry, a local code review graph engine for AI agents."
+license = "MIT"
+repository = "https://github.com/zibouddd/reposcry"
+homepage = "https://github.com/zibouddd/reposcry"
+documentation = "https://docs.rs/reposcry-graph"
+keywords = ["code-review", "graph", "repo", "ai", "mcp"]
+categories = ["development-tools"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+petgraph = "0.7"
+anyhow = "1"

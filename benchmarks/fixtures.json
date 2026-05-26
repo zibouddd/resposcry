@@ -1,0 +1,49 @@
+{
+  "fixtures": [
+    {
+      "name": "current_repo",
+      "kind": "local",
+      "path": ".",
+      "size": "small_rust_workspace",
+      "notes": "Primary smoke and regression fixture committed with the repository.",
+      "callers_query": "callers_of rebuild_graph",
+      "semantic_query": "cache database calls"
+    },
+    {
+      "name": "small_rust_repo",
+      "kind": "local",
+      "path": "benchmarks/fixtures/small_rust_repo",
+      "size": "small",
+      "notes": "Compact Rust repository with a small rebuild_graph pipeline and tests.",
+      "callers_query": "callers_of rebuild_graph",
+      "semantic_query": "graph cache rebuild"
+    },
+    {
+      "name": "medium_nextjs_repo",
+      "kind": "local",
+      "path": "benchmarks/fixtures/medium_nextjs_repo",
+      "size": "medium",
+      "notes": "Next.js-style repository with API routes, middleware, and server actions to exercise flow detection.",
+      "callers_query": "callers_of rebuild_graph",
+      "semantic_query": "graph cache rebuild route action"
+    },
+    {
+      "name": "mixed_monorepo",
+      "kind": "local",
+      "path": "benchmarks/fixtures/mixed_monorepo",
+      "size": "mixed",
+      "notes": "Multi-package repository with Rust and TypeScript components to track cross-language behavior.",
+      "callers_query": "callers_of rebuild_graph",
+      "semantic_query": "shared graph rebuild cache"
+    },
+    {
+      "name": "large_repo",
+      "kind": "local",
+      "path": "benchmarks/fixtures/large_repo",
+      "size": "large",
+      "notes": "Synthetic larger mixed repository with several apps, packages, and Rust services to observe scaling and database growth.",
+      "callers_query": "callers_of rebuild_graph",
+      "semantic_query": "graph cache rebuild route service"
+    }
+  ]
+}

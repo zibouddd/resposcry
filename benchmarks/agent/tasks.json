@@ -1,0 +1,117 @@
+[
+  {
+    "id": "nav_request_handling",
+    "type": "navigation",
+    "prompt": "Where is MCP request handling implemented? Return the top files and explain the request lifecycle.",
+    "difficulty": "easy",
+    "expected_files": [
+      "crates/reposcry-cli/src/bin/reposcry-mcp-plus.rs",
+      "crates/reposcry-cli/src/crg_cli.rs"
+    ],
+    "expected_terms": ["handle_line", "call_tool", "initialize", "tools/call", "tool_specs"]
+  },
+  {
+    "id": "nav_repo_scanning",
+    "type": "navigation",
+    "prompt": "Where is repository scanning implemented? List the main files and describe the scan pipeline from walking files to returning ScannedFile entries.",
+    "difficulty": "easy",
+    "expected_files": [
+      "crates/reposcry-indexer/src/scanner.rs"
+    ],
+    "expected_terms": ["FileScanner", "scan", "WalkBuilder", "should_ignore", "ScannedFile"]
+  },
+  {
+    "id": "nav_ignore_filtering",
+    "type": "navigation",
+    "prompt": "Where are ignored files filtered during indexing? Describe the two-layer ignore system and how DEFAULT_IGNORE and .reposcryignore work together.",
+    "difficulty": "medium",
+    "expected_files": [
+      "crates/reposcry-indexer/src/scanner.rs",
+      ".reposcryignore"
+    ],
+    "expected_terms": ["DEFAULT_IGNORE", "should_ignore", "read_reposcryignore", "ignore_pattern_matches"]
+  },
+  {
+    "id": "nav_context_generation",
+    "type": "navigation",
+    "prompt": "Where is AI context pack generation implemented? Explain how ContextBuilder works, what sections a ContextPack contains, and how the token budget is applied.",
+    "difficulty": "medium",
+    "expected_files": [
+      "crates/reposcry-context/src/lib.rs"
+    ],
+    "expected_terms": ["ContextBuilder", "ContextPack", "ContextConfig", "token_budget", "build", "extract_keywords"]
+  },
+  {
+    "id": "nav_semantic_search",
+    "type": "navigation",
+    "prompt": "Where is semantic search implemented? What backends are supported and what is the default? Explain the search flow from CLI to SQLite.",
+    "difficulty": "medium",
+    "expected_files": [
+      "crates/reposcry-cache/src/db.rs",
+      "crates/reposcry-cli/src/main.rs"
+    ],
+    "expected_terms": ["insert_search_vector", "search", "local-hash-v1", "fastembed", "candle", "ollama", "FTS5"]
+  },
+  {
+    "id": "impact_parser_schema",
+    "type": "impact-analysis",
+    "prompt": "If I change the ParsedFile struct in symbol.rs (add or remove a field), what files are impacted and need corresponding updates? List them and explain why each is impacted.",
+    "difficulty": "hard",
+    "expected_files": [
+      "crates/reposcry-graph/src/symbol.rs",
+      "crates/reposcry-indexer/src/parser.rs",
+      "crates/reposcry-cache/src/db.rs",
+      "crates/reposcry-context/src/lib.rs"
+    ],
+    "expected_terms": ["ParsedFile", "Symbol", "parse_file", "CacheDb", "ContextBuilder", "Serialize", "Deserialize"]
+  },
+  {
+    "id": "impact_cache_schema",
+    "type": "impact-analysis",
+    "prompt": "If I add a new table to the SQLite cache schema (e.g. a git_blame cache), what files and modules should change? Name each file and the specific change needed.",
+    "difficulty": "hard",
+    "expected_files": [
+      "crates/reposcry-cache/src/db.rs",
+      "crates/reposcry-cache/src/lib.rs",
+      "crates/reposcry-context/src/lib.rs",
+      "crates/reposcry-cli/src/main.rs",
+      "crates/reposcry-cli/src/crg_cli.rs"
+    ],
+    "expected_terms": ["CacheDb", "initialize", "CREATE TABLE", "rusqlite", "new_method"]
+  },
+  {
+    "id": "impact_context_config",
+    "type": "impact-analysis",
+    "prompt": "If I add a new field to ContextConfig (e.g. include_comments: bool), what files need changes? Trace the config from definition to usage.",
+    "difficulty": "medium",
+    "expected_files": [
+      "crates/reposcry-context/src/lib.rs",
+      "crates/reposcry-cli/src/main.rs",
+      "crates/reposcry-cli/src/crg_cli.rs"
+    ],
+    "expected_terms": ["ContextConfig", "token_budget", "build", "Default"]
+  },
+  {
+    "id": "bug_ignore_gap",
+    "type": "bugfix",
+    "prompt": "The .reposcryignore file is missing several ignore patterns that are present in DEFAULT_IGNORE in scanner.rs. Find which patterns are missing, explain the impact of each gap, and propose a fix.",
+    "difficulty": "medium",
+    "expected_files": [
+      "crates/reposcry-indexer/src/scanner.rs",
+      ".reposcryignore"
+    ],
+    "expected_terms": ["DEFAULT_IGNORE", ".reposcryignore", "target-*/", "*.pdb", "*.wasm"]
+  },
+  {
+    "id": "patch_add_stats_json",
+    "type": "patch",
+    "prompt": "Add a `--json` flag to the `reposcry stats` command so it outputs machine-readable JSON instead of human-readable text. The JSON output should include: file_count, symbol_count, import_count, edge_count, and language_stats. Implement the change.",
+    "difficulty": "hard",
+    "expected_files": [
+      "crates/reposcry-cli/src/main.rs",
+      "crates/reposcry-cache/src/db.rs"
+    ],
+    "expected_terms": ["cmd_stats", "Stats", "json!", "serde_json", "language_stats"],
+    "expected_patch_summary": "Add a --json flag to the Stats command in the Cli enum, add a cmd_stats_json function or branch, output serialized JSON"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "name": "mixed-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

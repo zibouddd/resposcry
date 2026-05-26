@@ -1,0 +1,37 @@
+# RepoScry Architecture
+
+RepoScry is a local code review graph engine with four main layers.
+
+## CLI layer
+
+- `reposcry`: repository indexing, context generation, validation, reporting, and install helpers
+- `reposcry`: indexing, context generation, CRG-compatible analysis commands, and MCP stdio server
+- semantic search backends currently include `local-hash-v1`, `ollama`, `fastembed`, and `candle`
+- the `fastembed` backend stores its model cache under `.reposcry/hf-home` by default unless `HF_HOME` or `REPOSCRY_FASTEMBED_CACHE_DIR` is set
+- the `candle` backend supports `qwen3` and `nomic-v2-moe`; it defaults to `Qwen/Qwen3-Embedding-0.6B` and uses `.reposcry/hf-home` unless `HF_HOME` or `REPOSCRY_CANDLE_CACHE_DIR` is set
+
+## Storage layer
+
+SQLite database under `.reposcry/reposcry.db` stores:
+
+- files
+- symbols
+- imports
+- file-level edges
+- call sites
+- symbol-level call edges
+- search index rows
+
+## Analysis layer
+
+- Tree-sitter parsers extract symbols, imports, calls, and tests
+- dependency resolvers rebuild file-level import edges
+- call-edge rebuilders persist file and symbol call graphs
+- CRG-compatible queries expose impact, search, and refactor planning
+
+## Output layer
+
+- Markdown and JSON CLI output
+- MCP `tools/list` and `tools/call`
+- benchmark JSON snapshots
+- AI context packs in `.reposcry/AI_CONTEXT.md`

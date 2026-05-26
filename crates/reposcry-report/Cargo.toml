@@ -1,0 +1,22 @@
+[package]
+name = "reposcry-report"
+version = "0.1.0"
+edition = "2021"
+description = "Report generation for RepoScry code graph analysis and AI-agent workflows."
+license = "MIT"
+repository = "https://github.com/zibouddd/reposcry"
+homepage = "https://github.com/zibouddd/reposcry"
+documentation = "https://docs.rs/reposcry-report"
+keywords = ["report", "repo", "graph", "ai", "analysis"]
+categories = ["development-tools"]
+
+[dependencies]
+reposcry-graph = { version = "0.1.0", path = "../reposcry-graph" }
+reposcry-context = { version = "0.1.0", path = "../reposcry-context" }
+reposcry-indexer = { version = "0.1.0", path = "../reposcry-indexer" }
+reposcry-git = { version = "0.1.0", path = "../reposcry-git" }
+reposcry-rules = { version = "0.1.0", path = "../reposcry-rules" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"

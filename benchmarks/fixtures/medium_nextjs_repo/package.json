@@ -1,0 +1,7 @@
+{
+  "name": "medium-nextjs-repo",
+  "private": true,
+  "scripts": {
+    "dev": "next dev"
+  }
+}
