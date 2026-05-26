@@ -69,6 +69,18 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Install RepoScry integration for MCP/agent platforms (defaults to all)
+    InstallMcp {
+        /// Target platform
+        #[arg(long, value_enum, default_value_t = InstallPlatform::All)]
+        platform: InstallPlatform,
+        /// Overwrite files that already exist
+        #[arg(long)]
+        force: bool,
+        /// Show what would be installed without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// VS Code Copilot Chat installer: `reposcry vscode install`
     Vscode {
         #[command(subcommand)]
@@ -335,6 +347,18 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Init => cmd_init(&repo_root, &reposcry_dir, &db_path),
         Commands::Install {
+            platform,
+            force,
+            dry_run,
+        } => cmd_install(
+            &repo_root,
+            &reposcry_dir,
+            &db_path,
+            platform,
+            force,
+            dry_run,
+        ),
+        Commands::InstallMcp {
             platform,
             force,
             dry_run,
@@ -733,7 +757,13 @@ fn cmd_index(
     preset_name: Option<&str>,
     search_index_options: &SearchIndexOptions,
 ) -> anyhow::Result<()> {
-    run_index(repo_root, reposcry_dir, db_path, preset_name, search_index_options)?;
+    run_index(
+        repo_root,
+        reposcry_dir,
+        db_path,
+        preset_name,
+        search_index_options,
+    )?;
     Ok(())
 }
 
@@ -862,15 +892,21 @@ fn run_index(
     let parse_ms = t_parse.elapsed().as_millis() as u64;
 
     let graph_cache_current = db.get_config(GRAPH_CACHE_STATUS_KEY)?.as_deref() == Some("current");
-    let search_index_current = db.get_config(SEARCH_INDEX_STATUS_KEY)?.as_deref() == Some("current");
+    let search_index_current =
+        db.get_config(SEARCH_INDEX_STATUS_KEY)?.as_deref() == Some("current");
     let has_new_or_changed_content = !changed_file_ids.is_empty();
     let rebuild_graph_cache = has_new_or_changed_content || !graph_cache_current;
-    let rebuild_search_cache = has_new_or_changed_content || !search_index_current || search_index_options.reembed_all;
+    let rebuild_search_cache =
+        has_new_or_changed_content || !search_index_current || search_index_options.reembed_all;
 
     let t_edge = Instant::now();
     if rebuild_graph_cache {
         db.set_config(GRAPH_CACHE_STATUS_KEY, "dirty")?;
-        let changed = if has_new_or_changed_content { Some(&changed_file_ids) } else { None };
+        let changed = if has_new_or_changed_content {
+            Some(&changed_file_ids)
+        } else {
+            None
+        };
         rebuild_persisted_import_edges(&db, changed)?;
         rebuild_persisted_call_edges(&db, changed)?;
         db.set_config(GRAPH_CACHE_STATUS_KEY, "current")?;
@@ -1318,7 +1354,10 @@ fn ensure_hf_home(cache_env_var: &str) -> anyhow::Result<PathBuf> {
     Ok(cache_dir)
 }
 
-fn rebuild_persisted_import_edges(db: &CacheDb, changed_file_ids: Option<&HashSet<i64>>) -> anyhow::Result<()> {
+fn rebuild_persisted_import_edges(
+    db: &CacheDb,
+    changed_file_ids: Option<&HashSet<i64>>,
+) -> anyhow::Result<()> {
     let files = db.get_all_files()?;
     let file_paths: HashSet<&str> = files.iter().map(|f| f.path.as_str()).collect();
     let file_by_path: HashMap<&str, &CachedFile> =
@@ -1337,9 +1376,10 @@ fn rebuild_persisted_import_edges(db: &CacheDb, changed_file_ids: Option<&HashSe
     }
 
     let sources: Vec<&CachedFile> = match changed_file_ids {
-        Some(changed_ids) if !changed_ids.is_empty() => {
-            files.iter().filter(|f| changed_ids.contains(&f.id)).collect()
-        }
+        Some(changed_ids) if !changed_ids.is_empty() => files
+            .iter()
+            .filter(|f| changed_ids.contains(&f.id))
+            .collect(),
         _ => files.iter().collect(),
     };
 
@@ -1364,7 +1404,10 @@ fn rebuild_persisted_import_edges(db: &CacheDb, changed_file_ids: Option<&HashSe
     Ok(())
 }
 
-fn rebuild_persisted_call_edges(db: &CacheDb, changed_file_ids: Option<&HashSet<i64>>) -> anyhow::Result<()> {
+fn rebuild_persisted_call_edges(
+    db: &CacheDb,
+    changed_file_ids: Option<&HashSet<i64>>,
+) -> anyhow::Result<()> {
     let files = db.get_all_files()?;
     let files_by_id: HashMap<i64, &CachedFile> = files.iter().map(|file| (file.id, file)).collect();
     let file_by_path: HashMap<&str, &CachedFile> =
@@ -1402,9 +1445,10 @@ fn rebuild_persisted_call_edges(db: &CacheDb, changed_file_ids: Option<&HashSet<
     }
 
     let sources: Vec<&CachedFile> = match changed_file_ids {
-        Some(changed_ids) if !changed_ids.is_empty() => {
-            files.iter().filter(|f| changed_ids.contains(&f.id)).collect()
-        }
+        Some(changed_ids) if !changed_ids.is_empty() => files
+            .iter()
+            .filter(|f| changed_ids.contains(&f.id))
+            .collect(),
         _ => files.iter().collect(),
     };
 
@@ -1434,8 +1478,7 @@ fn rebuild_persisted_call_edges(db: &CacheDb, changed_file_ids: Option<&HashSet<
                 &source_file.path,
                 &file_paths,
                 call_site,
-            )
-            else {
+            ) else {
                 continue;
             };
             let Some(source_symbol_id) = source_symbol.id else {
@@ -1486,9 +1529,7 @@ fn push_global_symbol_candidate(
     key: &str,
     symbol: &reposcry_graph::symbol::Symbol,
 ) {
-    let entry = global_symbol_candidates
-        .entry(key.to_string())
-        .or_default();
+    let entry = global_symbol_candidates.entry(key.to_string()).or_default();
     if entry.iter().any(|candidate| {
         candidate.id == symbol.id
             && candidate.file_path == symbol.file_path
@@ -1554,8 +1595,12 @@ fn resolve_callee_symbol_with_paths<'a>(
     if candidates.len() == 1 {
         return Some((candidates[0].clone(), "unique_global".to_string()));
     }
-    let resolved_import_targets =
-        resolved_import_target_paths_with_paths(file_imports, source_path, file_paths, &call_site.callee);
+    let resolved_import_targets = resolved_import_target_paths_with_paths(
+        file_imports,
+        source_path,
+        file_paths,
+        &call_site.callee,
+    );
     let import_candidates: Vec<_> = candidates
         .into_iter()
         .filter(|candidate| resolved_import_targets.contains(&candidate.file_path))
@@ -1571,11 +1616,14 @@ fn dedup_symbol_candidates(
 ) -> Vec<reposcry_graph::symbol::Symbol> {
     let mut deduped = Vec::new();
     for candidate in candidates {
-        if deduped.iter().any(|existing: &reposcry_graph::symbol::Symbol| {
-            existing.id == candidate.id
-                && existing.file_path == candidate.file_path
-                && existing.name == candidate.name
-        }) {
+        if deduped
+            .iter()
+            .any(|existing: &reposcry_graph::symbol::Symbol| {
+                existing.id == candidate.id
+                    && existing.file_path == candidate.file_path
+                    && existing.name == candidate.name
+            })
+        {
             continue;
         }
         deduped.push(candidate.clone());
@@ -1609,7 +1657,9 @@ fn resolved_import_target_paths_with_paths(
                     .filter_map(|name| name.strip_prefix("* as ").or(Some(name.as_str())))
                     .any(|name| name == callee)
         })
-        .filter_map(|import| resolve_import_target_with_paths(source_path, &import.target, file_paths))
+        .filter_map(|import| {
+            resolve_import_target_with_paths(source_path, &import.target, file_paths)
+        })
         .collect()
 }
 
@@ -1663,7 +1713,10 @@ fn resolve_workspace_package_import_target(
     raw_target: &str,
     file_paths: &HashSet<&str>,
 ) -> Option<String> {
-    let segments: Vec<&str> = raw_target.split('/').filter(|segment| !segment.is_empty()).collect();
+    let segments: Vec<&str> = raw_target
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
     if segments.is_empty() {
         return None;
     }
@@ -1686,7 +1739,8 @@ fn resolve_workspace_package_import_target(
 
     for root in candidate_roots {
         if subpath_segments.is_empty() {
-            if let Some(resolved) = find_candidate_path(&format!("{}/src/index", root), file_paths) {
+            if let Some(resolved) = find_candidate_path(&format!("{}/src/index", root), file_paths)
+            {
                 return Some(resolved);
             }
             if let Some(resolved) = find_candidate_path(&format!("{}/index", root), file_paths) {
@@ -1696,7 +1750,9 @@ fn resolve_workspace_package_import_target(
         }
 
         let subpath = subpath_segments.join("/");
-        if let Some(resolved) = find_candidate_path(&format!("{}/src/{}", root, subpath), file_paths) {
+        if let Some(resolved) =
+            find_candidate_path(&format!("{}/src/{}", root, subpath), file_paths)
+        {
             return Some(resolved);
         }
         if let Some(resolved) = find_candidate_path(&format!("{}/{}", root, subpath), file_paths) {
@@ -2483,8 +2539,14 @@ mod tests {
         let package_root = resolve_import_target("apps/web/lib/graph.ts", "@mixed/shared", &files);
         let package_subpath =
             resolve_import_target("apps/web/lib/graph.ts", "@large/graph/rebuild", &files);
-        assert_eq!(package_root.as_deref(), Some("packages/shared/src/index.ts"));
-        assert_eq!(package_subpath.as_deref(), Some("packages/graph/src/rebuild.ts"));
+        assert_eq!(
+            package_root.as_deref(),
+            Some("packages/shared/src/index.ts")
+        );
+        assert_eq!(
+            package_subpath.as_deref(),
+            Some("packages/graph/src/rebuild.ts")
+        );
     }
 
     fn symbol(id: i64, file_path: &str, name: &str, start_line: u32, end_line: u32) -> Symbol {
@@ -2518,7 +2580,8 @@ mod tests {
             resolution_strategy: Some("ast_ts_call".to_string()),
         };
 
-        let resolved = resolve_callee_symbol(&[], &candidates, &[], "app/actions.ts", &[], &call_site);
+        let resolved =
+            resolve_callee_symbol(&[], &candidates, &[], "app/actions.ts", &[], &call_site);
         let (resolved_symbol, strategy) = resolved.expect("expected unique global resolution");
         assert_eq!(resolved_symbol.file_path, "lib/graph.ts");
         assert_eq!(resolved_symbol.name, "rebuild_graph");

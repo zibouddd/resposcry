@@ -192,6 +192,14 @@ reposcry --repo . refactor_tool rename parse_rust parse_rust_v2
 
 RepoScry can install project instructions and helper scripts for multiple AI coding tools.
 
+Use the MCP-oriented install command when you want to install to all platforms by default:
+
+```bash
+reposcry install-mcp
+reposcry install-mcp --platform cursor
+reposcry install-mcp --platform claude --force
+```
+
 Install one platform:
 
 ```bash

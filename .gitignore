@@ -25,3 +25,14 @@ benchmarks/fixtures/**/.git/
 .code-review-graph/*.log
 # CRG:gitignore:END
 .git
+
+# reposcry:gitignore:BEGIN
+# reposcry local cache and generated reports
+.reposcry/
+reposcry.db
+.reposcry/*.db
+.reposcry/*.sqlite
+.reposcry/AI_CONTEXT.md
+.reposcry/PR_REVIEW.md
+.reposcry/*.log
+# reposcry:gitignore:END

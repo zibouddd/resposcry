@@ -2,6 +2,6 @@
 set -euo pipefail
 TASK="${*:-Review the current change safely}"
 mkdir -p .reposcry
-reposcry index
-reposcry context "$TASK" --strict --budget "${CRG_TOKEN_BUDGET:-20000}" --format markdown > .reposcry/AI_CONTEXT.md
+reposcry --repo . index --no-semantic
+reposcry --repo . context "$TASK" --strict --budget "${REPOSCRY_TOKEN_BUDGET:-20000}" --format markdown > .reposcry/AI_CONTEXT.md
 printf 'Wrote .reposcry/AI_CONTEXT.md\n'
