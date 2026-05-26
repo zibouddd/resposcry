@@ -12,18 +12,36 @@
 [![GitHub stars](https://img.shields.io/github/stars/zibouddd/reposcry?style=social)](https://github.com/zibouddd/reposcry/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-RepoScry is a local code review graph engine for repository indexing, impact analysis, AI context generation, CRG-compatible queries, graph export, watch-mode updates, and MCP tool serving.
+RepoScry is an early Rust-native local code graph for AI coding agents.
 
-The default workflow is optimized for AI coding agents: keep a fast lexical/code graph hot, update changed files incrementally, and run semantic/vector refresh only when needed.
+It is built for the edit loop: index the repository locally, generate a task-specific context pack, update only changed files after edits, and keep semantic/vector refresh outside the normal fast path.
+
+Use it as a local repo-memory layer for Codex, Claude Code, Cursor, OpenCode, Aider, Gemini CLI, and MCP-compatible coding tools. It is not a magic production-grade code-understanding engine: call resolution is heuristic, dynamic/framework behavior is under-approximated, and some languages are indexed at file level only.
 
 ## Why RepoScry
 
-- Rust-native local binaries for macOS, Linux, and Windows.
-- Incremental update loop for agents and editors.
-- Separate semantic refresh path so large embedding models do not block normal indexing.
-- CRG-compatible commands for code-review-graph style workflows.
-- MCP and MCP-plus stdio servers for AI coding tools.
-- Graph export to JSON, GraphML, and lightweight HTML.
+AI coding agents often waste context rediscovering repository structure before every edit. RepoScry gives them a bounded local map first: relevant files, symbols, imports, dependencies, reverse dependencies, affected flows, and validation commands.
+
+## What works today
+
+| Capability                   | Status                                                                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Rust CLI                     | Native Rust binary, designed to run locally without a hosted service.                                                             |
+| macOS/Linux/Windows binaries | Release workflow packages standalone archives for the main platforms when a tagged release is published.                          |
+| Incremental update loop      | `reposcry-update` and `reposcry-watch` update changed files for agent/editor sessions.                                            |
+| Separate semantic refresh    | Normal indexing can run without semantic/vector work; heavier semantic backends are opt-in.                                       |
+| CRG-style workflows          | Includes commands for architecture overview, graph queries, impact radius, affected flows, semantic search, and refactor helpers. |
+| MCP support                  | Includes a CRG-compatible MCP stdio server and an expanded read-only MCP-plus server.                                             |
+| Graph export                 | Exports JSON, GraphML, lightweight HTML, and symbol graph JSON.                                                                   |
+
+## What is still early
+
+- Call resolution uses heuristics when multiple symbol matches are plausible.
+- Dynamic imports, reflection, generated code, and framework runtime behavior are under-approximated.
+- Some languages are indexed only at file/path/LOC/language level until parser extraction is added.
+- Diff-based commands inspect git refs, not unstaged working tree edits.
+- Heavy semantic backends such as Candle/Qwen3 can be slow on first run because model download and vector generation are outside the fast edit loop.
+- Treat RepoScry as a practical local repo map for agents, not as a complete static-analysis replacement.
 
 ## Project stats
 
@@ -319,10 +337,10 @@ The SQLite cache lives in `.reposcry/reposcry.db`.
 
 ## Downloads
 
-| Channel         | Purpose                                                          |
-| --------------- | ---------------------------------------------------------------- |
-| GitHub Releases | Standalone binaries for macOS, Linux, and Windows.               |
-| crates.io       | Source-based installation through Cargo after crate publication. |
+| Channel         | Purpose                                                                              |
+| --------------- | ------------------------------------------------------------------------------------ |
+| GitHub Releases | Standalone binaries for macOS, Linux, and Windows when release publication succeeds. |
+| crates.io       | Source-based installation through Cargo after crate publication.                     |
 
 [![GitHub release downloads](https://img.shields.io/github/downloads/zibouddd/reposcry/total.svg)](https://github.com/zibouddd/reposcry/releases)
 [![Crates.io downloads](https://img.shields.io/crates/d/reposcry-cli.svg)](https://crates.io/crates/reposcry-cli)
@@ -352,6 +370,8 @@ git push origin v0.1.0
 ```
 
 The release workflow packages all binaries and publishes checksums.
+
+If GitHub release creation fails with `Resource not accessible by integration`, enable **Settings → Actions → General → Workflow permissions → Read and write permissions** or publish with a token that has `contents: write`.
 
 ## Release smoke
 
