@@ -1,6 +1,6 @@
 [package]
 name = "reposcry-indexer"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "Repository scanner and AST parser engine for RepoScry code graph indexing."
 license = "MIT"
@@ -11,8 +11,8 @@ keywords = ["indexer", "repo", "graph", "ast", "ai"]
 categories = ["development-tools", "parser-implementations"]
 
 [dependencies]
-reposcry-graph = { version = "0.1.0", path = "../reposcry-graph" }
-reposcry-cache = { version = "0.1.0", path = "../reposcry-cache" }
+reposcry-graph = { version = "0.1.2", path = "../reposcry-graph" }
+reposcry-cache = { version = "0.1.2", path = "../reposcry-cache" }
 ignore = "0.4"
 walkdir = "2"
 globset = "0.4"

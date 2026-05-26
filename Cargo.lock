@@ -2423,7 +2423,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "reposcry-cache"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2436,7 +2436,7 @@ dependencies = [
 
 [[package]]
 name = "reposcry-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2462,7 +2462,7 @@ dependencies = [
 
 [[package]]
 name = "reposcry-context"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "reposcry-cache",
@@ -2477,7 +2477,7 @@ dependencies = [
 
 [[package]]
 name = "reposcry-git"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2489,7 +2489,7 @@ dependencies = [
 
 [[package]]
 name = "reposcry-graph"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "petgraph",
@@ -2499,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "reposcry-indexer"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "blake3",
@@ -2526,7 +2526,7 @@ dependencies = [
 
 [[package]]
 name = "reposcry-report"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "reposcry-context",
@@ -2541,7 +2541,7 @@ dependencies = [
 
 [[package]]
 name = "reposcry-rules"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "globset",

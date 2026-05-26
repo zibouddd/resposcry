@@ -1,6 +1,6 @@
 [package]
 name = "reposcry-cache"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "SQLite cache layer for RepoScry code graph indexing and AI-agent workflows."
 license = "MIT"
@@ -11,7 +11,7 @@ keywords = ["code-review", "sqlite", "graph", "repo", "ai"]
 categories = ["development-tools", "database"]
 
 [dependencies]
-reposcry-graph = { version = "0.1.0", path = "../reposcry-graph" }
+reposcry-graph = { version = "0.1.2", path = "../reposcry-graph" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

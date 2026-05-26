@@ -1,6 +1,6 @@
 [package]
 name = "reposcry-context"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "AI context pack generation for RepoScry code graph workflows."
 license = "MIT"
@@ -11,11 +11,11 @@ keywords = ["context", "repo", "graph", "ai", "agent"]
 categories = ["development-tools"]
 
 [dependencies]
-reposcry-graph = { version = "0.1.0", path = "../reposcry-graph" }
-reposcry-indexer = { version = "0.1.0", path = "../reposcry-indexer" }
-reposcry-cache = { version = "0.1.0", path = "../reposcry-cache" }
-reposcry-git = { version = "0.1.0", path = "../reposcry-git" }
-reposcry-rules = { version = "0.1.0", path = "../reposcry-rules" }
+reposcry-graph = { version = "0.1.2", path = "../reposcry-graph" }
+reposcry-indexer = { version = "0.1.2", path = "../reposcry-indexer" }
+reposcry-cache = { version = "0.1.2", path = "../reposcry-cache" }
+reposcry-git = { version = "0.1.2", path = "../reposcry-git" }
+reposcry-rules = { version = "0.1.2", path = "../reposcry-rules" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"

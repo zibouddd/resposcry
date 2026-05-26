@@ -1,6 +1,6 @@
 [package]
 name = "reposcry-cli"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 autobins = false
 description = "Rust-native repository graph CLI for AI coding agents."
@@ -32,13 +32,13 @@ name = "reposcry-mcp-plus"
 path = "src/bin/reposcry-mcp-plus.rs"
 
 [dependencies]
-reposcry-graph = { version = "0.1.0", path = "../reposcry-graph" }
-reposcry-indexer = { version = "0.1.0", path = "../reposcry-indexer" }
-reposcry-cache = { version = "0.1.0", path = "../reposcry-cache" }
-reposcry-git = { version = "0.1.0", path = "../reposcry-git" }
-reposcry-context = { version = "0.1.0", path = "../reposcry-context" }
-reposcry-rules = { version = "0.1.0", path = "../reposcry-rules" }
-reposcry-report = { version = "0.1.0", path = "../reposcry-report" }
+reposcry-graph = { version = "0.1.2", path = "../reposcry-graph" }
+reposcry-indexer = { version = "0.1.2", path = "../reposcry-indexer" }
+reposcry-cache = { version = "0.1.2", path = "../reposcry-cache" }
+reposcry-git = { version = "0.1.2", path = "../reposcry-git" }
+reposcry-context = { version = "0.1.2", path = "../reposcry-context" }
+reposcry-rules = { version = "0.1.2", path = "../reposcry-rules" }
+reposcry-report = { version = "0.1.2", path = "../reposcry-report" }
 
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
